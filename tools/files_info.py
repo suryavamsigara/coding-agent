@@ -1,19 +1,16 @@
 import os
-import schemas
+from schemas import FileInfo
 
-working_directory = "testing_directory"
-print(os.path.abspath(working_directory))
-
-def get_file_info(working_directory: str, directory: str = ".") -> schemas.FileInfo | str:
+def get_file_info(working_directory: str, directory: str = ".") -> FileInfo | str:
     try:
         absolute_working_directory = os.path.abspath(working_directory)
         absolute_directory = os.path.abspath(os.path.join(absolute_working_directory, directory))
 
-        if not os.path.isdir(absolute_directory):
-            return f"Error: Directory {absolute_directory} does not exist"
-
         if not absolute_directory.startswith(absolute_working_directory):
-            return f"Error: Directory '{absolute_directory}' is not in working directory."
+            return f"Error: Directory '{directory}' is not in working directory."
+        
+        if not os.path.isdir(absolute_directory):
+            return f"Error: Directory {directory} does not exist"
         
         file_paths = []
         dir_paths = []
@@ -33,11 +30,7 @@ def get_file_info(working_directory: str, directory: str = ".") -> schemas.FileI
                 else:
                     dir_paths.append(os.path.join(relative_root, dir_name))
 
-        return schemas.FileInfo(directories=dir_paths, files=file_paths)
+        return FileInfo(directories=dir_paths, files=file_paths)
     except Exception as e:
         return f"Error: Could not access the files: {e}"
-print("function is being called...")
-result = get_file_info(working_directory)
-if isinstance(result, schemas.FileInfo):
-    print(result.model_dump())
-print("function finished...")
+
