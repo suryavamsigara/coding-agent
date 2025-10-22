@@ -6,6 +6,9 @@ def get_file_info(working_directory: str, directory: str = ".") -> FileInfo | st
         absolute_working_directory = os.path.abspath(working_directory)
         absolute_directory = os.path.abspath(os.path.join(absolute_working_directory, directory))
 
+        if not os.path.isdir(absolute_working_directory):
+            return f"Error: Working directory '{working_directory}' does not exist."
+
         if not absolute_directory.startswith(absolute_working_directory):
             return f"Error: Directory '{directory}' is not in working directory."
         
@@ -34,3 +37,17 @@ def get_file_info(working_directory: str, directory: str = ".") -> FileInfo | st
     except Exception as e:
         return f"Error: Could not access the files: {e}"
 
+get_file_info_function = {
+    "name": "get_file_info",
+    "description": "Lists all files and directories recursively starting from a given directory.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "directory": {
+                "type": "string",
+                "description": "The directory to list files from, relative to the working directory. Use '.' for the current working directory.",
+            }
+        },
+        "required": ["directory"]
+    }
+}
