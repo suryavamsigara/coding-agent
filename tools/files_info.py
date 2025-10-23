@@ -11,7 +11,7 @@ def get_file_info(working_directory: str, directory: str = "."):
         return f"Error: Directory '{directory}' is not in working directory."
     
     if not os.path.isdir(absolute_directory):
-        return f"Error: Directory {directory} does not exist"
+        return f"Error: Directory '{directory}' does not exist"
     
     file_paths = []
     dir_paths = []
@@ -31,7 +31,7 @@ def get_file_info(working_directory: str, directory: str = "."):
             else:
                 dir_paths.append(os.path.join(relative_root, dir_name))
 
-    return {"directories":dir_paths, "files":file_paths}
+    return {"directories": dir_paths, "files": file_paths}
 
 get_file_info_function = {
     "name": "get_file_info",
