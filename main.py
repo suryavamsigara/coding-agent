@@ -6,10 +6,9 @@ from google.genai import types
 from tools.files_info import get_file_info_function
 from tools.read_file import read_file_function
 from tools.write_file import write_file_function
+from tools.delete_path import delete_path_function
 from call_function import call_function
 from typing import Optional, List
-
-WORKING_DIRECTORY = "testing_directory"
 
 def main():
     load_dotenv()
@@ -25,11 +24,12 @@ def main():
     - List files and directories
     - Read file contents
     - Write to a file
+    - Delete a file or directory
 
     Core behavior:
-    1. You must reason about the project structure before taking any actions.
-    2. **ALWAYS START BY CALLING get_file_info on the working directory to UNDERSTAND WHAT FILES EXIST.**
-    3. Then, depending on the user request, selectively call relavant functions.
+    1. ALWAYS start by calling `get_file_info` with `directory='.'` to list **all files recursively** within the project.
+    2. After receiving the result, you MUST analyze the returned directory and file paths — including those inside nested folders.
+    3. You should then decide which specific files to read or modify based on the user's request, using the full relative paths returned (e.g. `subdir/code.py`).
     4. You should automatically decide which files to inspect or execute — the user does NOT need to specify them.
     5. Never perform unnecessary or repetitive function calls.
     6. All paths you reference should be relative to the working directory.
@@ -49,6 +49,7 @@ def main():
             types.FunctionDeclaration(**get_file_info_function),
             types.FunctionDeclaration(**read_file_function),
             types.FunctionDeclaration(**write_file_function),
+            types.FunctionDeclaration(**delete_path_function),
         ]
     )
 
@@ -82,15 +83,16 @@ def main():
             print(f"\nFUNCTION CALLS: {function_calls}\n")
             for function_call_part in response.function_calls:
                 result = call_function(function_call_part)
-                print("------------function called-----------")
+                print("--------------------------------------------------")
                 all_parts.extend(result.parts)
                 print(f"-> Function executed: {function_call_part.name}")
                 print("--------------------------------------------------")
+                print(result)
             tool_response = types.Content(role="tool", parts=all_parts)
             contents.append(tool_response)
         else:
             # final agent text message
-            print("-------------------------\nFINAL RESPONSEE\n")
+            print("\nFINAL RESPONSEE\n")
             print(response.text)
             return
 
