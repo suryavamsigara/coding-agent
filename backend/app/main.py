@@ -9,7 +9,7 @@ from .agent.tools.write_file import write_file_function
 from .agent.tools.delete_path import delete_path_function
 from .agent.tools.copy_file import copy_file_function
 from .agent.tools.run_file import run_file_function
-from call_function import call_function
+from .agent.call_function import call_function
 from typing import Optional, List
 
 def main():
