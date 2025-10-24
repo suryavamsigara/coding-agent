@@ -1,9 +1,9 @@
-from tools.files_info import get_file_info
-from tools.read_file import read_file
-from tools.write_file import write_file
-from tools.delete_path import delete_path
-from tools.copy_file import copy_file
-from tools.run_file import run_file
+from .agent.tools.files_info import get_file_info
+from .agent.tools.read_file import read_file
+from .agent.tools.write_file import write_file
+from .agent.tools.delete_path import delete_path
+from .agent.tools.copy_file import copy_file
+from .agent.tools.run_file import run_file
 from google.genai import types
 
 working_directory = "testing_directory"

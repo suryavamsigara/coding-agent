@@ -3,12 +3,12 @@ import sys
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from tools.files_info import get_file_info_function
-from tools.read_file import read_file_function
-from tools.write_file import write_file_function
-from tools.delete_path import delete_path_function
-from tools.copy_file import copy_file_function
-from tools.run_file import run_file_function
+from .agent.tools.files_info import get_file_info_function
+from .agent.tools.read_file import read_file_function
+from .agent.tools.write_file import write_file_function
+from .agent.tools.delete_path import delete_path_function
+from .agent.tools.copy_file import copy_file_function
+from .agent.tools.run_file import run_file_function
 from call_function import call_function
 from typing import Optional, List
 
