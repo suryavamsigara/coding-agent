@@ -8,6 +8,7 @@ from tools.read_file import read_file_function
 from tools.write_file import write_file_function
 from tools.delete_path import delete_path_function
 from tools.copy_file import copy_file_function
+from tools.run_file import run_file_function
 from call_function import call_function
 from typing import Optional, List
 
@@ -27,6 +28,7 @@ def main():
     - Write to a file
     - Delete a file or directory
     - Copy a file from source to destination
+    - Execute python files
 
     Core behavior:
     1. ALWAYS start by calling `get_file_info` with `directory='.'` to list **all files recursively** within the project.
@@ -54,6 +56,7 @@ def main():
             types.FunctionDeclaration(**write_file_function),
             types.FunctionDeclaration(**delete_path_function),
             types.FunctionDeclaration(**copy_file_function),
+            types.FunctionDeclaration(**run_file_function),
         ]
     )
 

@@ -1,7 +1,6 @@
 import os
 
 def write_file(working_directory: str, file_path: str, content: str):
-    print("Function call")
     absolute_working_directory = os.path.abspath(working_directory)
 
     if not os.path.isdir(absolute_working_directory):
