@@ -1,12 +1,14 @@
 import os
+from ....app.config import get_working_directory
 
-def read_file(working_directory: str, file_path: str, max_lines: int | None = None):
-    absolute_working_directory = os.path.abspath(working_directory)
+def read_file(file_path: str, max_lines: int | None = None):
+    absolute_working_directory = get_working_directory()
+    working_directory = os.path.dirname(absolute_working_directory)
 
     if not os.path.isdir(absolute_working_directory):
         return f"Working directory '{working_directory}' does not exist."
     
-    absolute_file_path = os.path.abspath(os.path.join(working_directory, file_path))
+    absolute_file_path = os.path.join(absolute_working_directory, file_path)
 
     if not absolute_file_path.startswith(absolute_working_directory):
         return f"File '{file_path}' is not in working directory."

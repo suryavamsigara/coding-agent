@@ -1,14 +1,16 @@
 import os
 import shutil
+from ....app.config import get_working_directory
 
-def copy_file(working_directory: str, source: str, destination: str):
-    absolute_working_directory = os.path.abspath(working_directory)
+def copy_file(source: str, destination: str):
+    absolute_working_directory = get_working_directory()
+    working_directory = os.path.dirname(absolute_working_directory)
 
     if not os.path.isdir(absolute_working_directory):
         return f"Working directory '{working_directory}' does not exist."
     
-    absolute_source_path = os.path.abspath(os.path.join(working_directory, source))
-    absolute_destination_path = os.path.abspath(os.path.join(working_directory, destination))
+    absolute_source_path = os.path.join(absolute_working_directory, source)
+    absolute_destination_path = os.path.join(absolute_working_directory, destination)
 
     if not absolute_source_path.startswith(absolute_working_directory) or not absolute_destination_path.startswith(absolute_working_directory):
         return f"Error: Access outside the working directory is denied."

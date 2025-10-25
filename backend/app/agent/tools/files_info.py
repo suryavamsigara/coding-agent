@@ -1,8 +1,10 @@
 import os
+from ....app.config import get_working_directory
 
-def get_file_info(working_directory: str, directory: str = "."):
-    absolute_working_directory = os.path.abspath(working_directory)
+def get_file_info(directory: str = "."):
+    absolute_working_directory = get_working_directory()
     absolute_directory = os.path.abspath(os.path.join(absolute_working_directory, directory))
+    working_directory = os.path.dirname(absolute_working_directory)
 
     if not os.path.isdir(absolute_working_directory):
         return f"Error: Working directory '{working_directory}' does not exist."

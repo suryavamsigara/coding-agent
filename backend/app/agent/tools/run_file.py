@@ -1,13 +1,15 @@
 import os
 import subprocess
+from ....app.config import get_working_directory
 
-def run_file(working_directory: str, file_path: str, args = None):
-    absolute_working_directory = os.path.abspath(working_directory)
+def run_file(file_path: str, args = None):
+    absolute_working_directory = get_working_directory()
+    working_directory = os.path.dirname(absolute_working_directory)
 
     if not os.path.isdir(absolute_working_directory):
         return f"Working directory '{working_directory}' does not exist."
     
-    absolute_file_path = os.path.abspath(os.path.join(working_directory, file_path))
+    absolute_file_path = os.path.join(absolute_working_directory, file_path)
 
     if args is None:
         args = []
