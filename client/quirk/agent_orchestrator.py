@@ -5,14 +5,37 @@ from dotenv import load_dotenv
 from typing import Optional, List
 from google import genai
 from google.genai import types
-from .tools.files_info import get_file_info_function
-from .tools.read_file import read_file_function
-from .tools.write_file import write_file_function
-from .tools.delete_path import delete_path_function
-from .tools.copy_file import copy_file_function
-from .tools.run_file import run_file_function
-from ..call_function import call_function
+from google.genai.types import Tool, FunctionDeclaration, GenerateContentConfig, Content, Part
 
+# Testing
+class CodingAgent:
+    def __init__(self, session):
+        self.session = session
+
+    async def run(self):
+        print("\nInitializing...")
+        await self.session.initialize()
+
+        tools_response = await self.session.list_tools()
+        tools_list = getattr(tools_response, "tools", None)
+        if tools_list is None:
+            print("Could not parse tools list:", tools_response)
+        else:
+            print("Tools available:", [tool.name for tool in tools_list])
+
+        try:
+            response = await self.session.call_tool(
+                "get_file_info",
+                {"directory": "."}
+            )
+            print("\nTool Response:\n", response)
+        except Exception as e:
+            print(f"\nError calling tool: {e}")
+        print("\nTest completed. Exiting..")
+
+
+
+"""
 load_dotenv()
 
 class CodingAgent:
@@ -23,7 +46,7 @@ class CodingAgent:
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
-        self.system_prompt = """
+        self.system_prompt = ""
         You are an autonomous AI coding agent.
 
         Your purpose is to understand and operate on the codebase in the working directory to answer questions, analyze functionality, or perform debugging and modification tasks.
@@ -47,7 +70,7 @@ class CodingAgent:
         8. The working directory is implicitly handled — do not include it in your function calls.
 
         Your goal is to behave like a self-directed software engineer who can explore, reason about, and act on a local codebase intelligently.
-        """
+        ""
         self.tools = types.Tool(
             function_declarations=[
                 types.FunctionDeclaration(**get_file_info_function),
@@ -135,3 +158,5 @@ class CodingAgent:
             print("-"*50)
             return final_text.strip()
         return "Error: Maximum iterations reached.  "
+
+"""
