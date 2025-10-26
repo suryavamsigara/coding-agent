@@ -1,5 +1,6 @@
 import os
 import sys
+import questionary
 from fastapi import FastAPI
 from .agent.agent_orchestrator import CodingAgent
 
@@ -10,15 +11,30 @@ async def root():
     return {"message": "My coding agent API."}
 
 def run_agent():
-    if len(sys.argv) < 2:
-        print("Enter a question..\n")
-        print("Format: uv run -m backend.app.main 'question'")
+    try:
+       agent = CodingAgent()
+    except Exception as e:
+        print(f"[Initialization Error] {e}")
         sys.exit(1)
-    
-    prompt = sys.argv[1]
-    agent = CodingAgent()
-    agent.run(prompt)
+
+    while True:
+        try:
+            prompt = questionary.text("User: ").ask()
+
+            if prompt is None or prompt.lower() in ['exit', 'quit']:
+                print("\nExiting...")
+                break
+
+            if not prompt.strip():
+                continue
+            agent.run(prompt)
+
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
+        except Exception as e:
+            print("\nError: ", e)
+            pass
 
 if __name__ == "__main__":
     run_agent()
-    

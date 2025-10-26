@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 from typing import Optional, List
 from google import genai
@@ -9,7 +10,7 @@ from .tools.write_file import write_file_function
 from .tools.delete_path import delete_path_function
 from .tools.copy_file import copy_file_function
 from .tools.run_file import run_file_function
-from .call_function import call_function
+from ..call_function import call_function
 
 load_dotenv()
 
@@ -57,6 +58,39 @@ class CodingAgent:
             ]
         )
 
+    def _think(self, msg: str):
+        print(f"\n[Thinking] {msg}")
+    
+    def _calling(self, fc: types.FunctionCall):
+        args = ", ".join(f"{k}={v!r}" for k, v in fc.args.items())
+        print(f"\n[Calling] {fc.name}({args})")
+
+    def _fc_result(self, result):
+        for part in result.parts:
+            if not hasattr(part, "function_response"):
+                continue
+            response = part.function_response.response
+            if "error" in response:
+                print(f"[Error] {response['error']}")
+                return
+            data = response.get("result", {})
+            if isinstance(data, dict):
+                self._print_strctured_result(data)
+            else:
+                print(f"[Result] {data}")
+
+    def _print_strctured_result(self, result_data: dict):
+        
+        if "stdout" in result_data or "stderr" in result_data:
+            print(f"[Execution] Output")
+            if result_data.get("stdout"):
+                print(f"STDOUT:\n{result_data["stdout"]}")
+            if result_data.get("stderr"):
+                print(f"STDERR:\n{result_data["stderr"]}")
+        else:
+            result = json.dumps(result_data)
+            print(f"Result:\n{result}")
+
     def run(self, prompt: str, max_iters: int=20) -> str:
         config = types.GenerateContentConfig(
             tools=[self.tools],
@@ -67,33 +101,36 @@ class CodingAgent:
             types.Content(role="user", parts=[types.Part(text=prompt)]),
         ]
 
-        for _ in range(0, max_iters):
+        for i in range(0, max_iters):
+            self._think(f"Sending request (iteration {i+1})")
             response = self.client.models.generate_content(
                 model = self.model,
                 contents = contents,
                 config=config,
             )
 
-            if response is None:
-                return f"Error: No response from model"
+            if not response or not response.candidates:
+                return f"Error: No response from LLM"
 
-            if response.candidates:
-                contents.append(response.candidates[0].content)
+            candidate = response.candidates[0]
+            contents.append(candidate.content)
 
             if response.function_calls:
                 all_parts = []
-                function_calls: Optional[List[types.FunctionCall]] = response.function_calls
-                print(f"\nFUNCTION CALLS: {function_calls}\n")
+
                 for function_call_part in response.function_calls:
+                    self._calling(function_call_part)
                     result = call_function(function_call_part)
-                    print("--------------------------------------------------")
+                    self._fc_result(result)
                     all_parts.extend(result.parts)
-                    print(f"-> Function executed: {function_call_part.name}")
-                    print("--------------------------------------------------")
-                    print(result)
                 tool_response = types.Content(role="tool", parts=all_parts)
                 contents.append(tool_response)
-            else:
-                print("\nFINAL RESPONSEE\n")
-                print(response.text)
-                return
+                continue
+            
+            final_text = candidate.content.parts[0].text if candidate.content.parts else ""
+            print("\n[Final Answer]")
+            print("-"*50)
+            print(final_text.strip())
+            print("-"*50)
+            return final_text.strip()
+        return "Error: Maximum iterations reached.  "
