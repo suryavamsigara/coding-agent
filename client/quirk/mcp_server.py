@@ -1,12 +1,10 @@
 import os
 import subprocess
 import shutil
-import argparse
-import uvicorn
 from mcp.server.fastmcp import FastMCP
 from quirk.config import get_working_directory
 
-mcp = FastMCP("Quirk Tools")
+mcp = FastMCP("Quirk Tools", host="127.0.0.1", port=9000)
 
 @mcp.tool()
 def get_file_info(directory: str = "."):
@@ -200,20 +198,6 @@ def copy_file(source: str, destination: str):
             return f"Copied '{source}' to '{destination}'."
     except Exception as e:
         return f"Error: Could not copy the file: {e}"
-    
 
-def create_app():
-    return mcp.sse_app()
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio")
-    parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-
-    if args.transport == "sse":
-        app = create_app()
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-    else:
-        mcp.run(transport="stdio")
+if __name__=="__main__":
+    mcp.run(transport="streamable-http")
