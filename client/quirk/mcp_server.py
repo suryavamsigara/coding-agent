@@ -40,7 +40,7 @@ def get_file_info(directory: str = "."):
             else:
                 dir_paths.append(os.path.join(relative_root, dir_name))
 
-    return {"directories": dir_paths, "files": file_paths}
+    return {"directories": sorted(dir_paths), "files": sorted(file_paths)}
 
 
 @mcp.tool()
