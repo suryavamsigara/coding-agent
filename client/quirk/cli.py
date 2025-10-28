@@ -2,7 +2,10 @@ import os
 import sys, time
 import json
 import asyncio
+import subprocess
+import socket
 import httpx
+import random
 import questionary
 from questionary import Style
 from mcp.client.streamable_http import streamablehttp_client
@@ -11,6 +14,54 @@ from mcp import ClientSession
 BACKEND_URL = "http://127.0.0.1:8000/chat"
 MCP_SERVER_URL = "http://127.0.0.1:9000/mcp"
 MAX_ITERS = 8
+
+mcp_process = None
+
+tool_actions = {
+    "get_file_info": "Scanning Files...",
+    "read_file": "Reading File Contents..",
+    "write_file": "Applying Modifications...",
+    "delete_path": "Deleting..",
+    "copy_file": "Copying File...",
+    "run_file": "Executing Script..",
+    "_default": "Quirking"
+}
+
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
+def ensure_mcp_server():
+    global mcp_process
+    if is_port_in_use(9000):
+        print_agent("MCP server already running..", "gray")
+        return
+    print_agent("Starting MCP server", "gray")
+
+    try:
+        mcp_process = subprocess.Popen(
+            [sys.executable, "-m", "quirk.mcp_server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        time.sleep(2)
+        if is_port_in_use(9000):
+            print_agent("MCP server started..", "gray")
+        else:
+            print_agent("MCP server failed to start", "yellow")
+    except Exception as e:
+        print_agent(f"Error starting MCP server: {e}", "yellow")
+
+def stop_mcp_server():
+    global mcp_process
+    if mcp_process and mcp_process.poll() is None:
+        print_agent("Stoppign MCP server...", "gray")
+        mcp_process.terminate()
+        try:
+            mcp_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            mcp_process.kill()
+        print_agent("MCP server stopped", "gray")
 
 async def safe_input(prompt: str) -> str:
     """Lets us use input() without freezing the async event loop"""
@@ -28,9 +79,8 @@ async def run_quirk(prompt: str):
                 await session.initialize()
                 tools_obj = await session.list_tools()
                 tools_list = [tool.model_dump() for tool in tools_obj.tools]
-        print(f"MCP connected: {len(tools_list)} tools found.")
     except Exception as e:
-        print(f"Error connecting to MCP server at {MCP_SERVER_URL}: {e}")
+        print_agent(f"MCP server failed to start: {e}", "yellow")
         return
 
     current_prompt = prompt
@@ -44,8 +94,6 @@ async def run_quirk(prompt: str):
                 "tool_result": tool_result_payload,
                 "tools_list": tools_list
             }
-
-            print("\nSending to backend:", json.dumps(payload, indent=2, default=str))
 
             try:
                 resp = await client.post(BACKEND_URL, json=payload, timeout=40)
@@ -61,19 +109,20 @@ async def run_quirk(prompt: str):
             session_id = data.get("session_id")
 
             if data.get("final_answer"):
-                print(f"\nFinal Response:\n{data['final_answer']}")
+                print_agent(data['final_answer'])
                 return
 
             elif data.get("tool_call"):
                 call = data["tool_call"]
                 tool_name = call["tool_name"]
                 params = call.get("params", {})
-                print(f"\nRequest: {tool_name}({params})")
+                action_msg = tool_actions.get(tool_name, tool_actions["_default"])
+                print_agent(action_msg, "quirk")
 
                 if tool_name in {"write_file", "delete_path"}:
                     confirm = (await safe_input("Apply this change? [y/N]: ")).strip().lower()
                     if confirm != "y":
-                        print("Request denied")
+                        print_agent("request denied", "yellow")
                         tool_result_payload = {
                             "tool_name": tool_name,
                             "response": {"error": "User denied write request"}
@@ -87,28 +136,20 @@ async def run_quirk(prompt: str):
                             result = await session.call_tool(tool_name, params)
 
                             output = getattr(result, "content", None)
-                            print("\n======a=a=a=a=aa=a=a==\n")
-                            print(output)
-                            print("\n=a=a===========aa\n")
                             
                             if isinstance(output, list) and output:
                                 item = output[0].text if hasattr(output[0], "text") else str(output[0])
                             else:
                                 item = str(output)
 
-                            print(f"Tool Output: {str(item)[:180]}..")
+                            print_agent("✔ Done", "gray")
 
                             tool_result_payload = {
                                 "tool_name": tool_name,
                                 "response": item
                             }
-
-                            print("\n=========================\n")
-                            print(tool_result_payload)
-                            print("\n==========================\n")
-
                 except Exception as e:
-                    print(f"Error calling tool '{tool_name}': {e}")
+                    print_agent(f"Error {tool_actions.get(tool_name)}\n{e}", "yellow")
                     tool_result_payload = {
                         "tool_name": tool_name,
                         "response": {"error": str(e)}
@@ -120,10 +161,10 @@ async def run_quirk(prompt: str):
 
 quirk_style = Style(
     [
-        ("qmark",       "fg:#5fafff bold"),      # bright blue
+        ("qmark",       "fg:#5fafff bold"),
         ("question",    "fg:#ffffff bold"),
-        ("answer",      "fg:#aaffaa bold"),      # light green
-        ("pointer",     "fg:#ffaf5f bold"),      # orange pointer
+        ("answer",      "fg:#aaffaa bold"),
+        ("pointer",     "fg:#ffaf5f bold"),
         ("highlighted", "fg:#ffaf5f bold"),
         ("selected",    "fg:#5fffff bold"),
         ("separator",   "fg:#444444"),
@@ -132,6 +173,9 @@ quirk_style = Style(
         ("disabled",    "fg:#555555 italic"),
     ]
 )
+
+glitch = ["Decoding", "Thinking", "Re-routing synapses", "Quantum whispering",
+          "Breaking reality", "Aligning bits", "Quirking"]
 
 def banner() -> None:
     title = "Quirk"
@@ -145,7 +189,7 @@ def main_menu() -> str:
         "Action",
         choices=[
             "Ask Quirk",
-            "Show Tools",
+            "Show Configured Tools",
             "Exit",
         ],
         style=quirk_style,
@@ -166,15 +210,18 @@ def print_agent(msg: str, color: str = "") -> None:
         msg_color = "\033[38;5;228m"
     elif color == "gray":
         msg_color = "\033[38;5;244m"
+    elif color == "text":
+        msg_color = "\033[38;5;15m"
     else:
         msg_color = "\033[38;5;252m"
 
     print(f"{prefix} {msg_color}{msg}{reset}")
 
 
-def thinking_animation(msg: str = "Quirk is thinking") -> None:
+def thinking_animation(msgs, duration=10) -> None:
     spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    for _ in range(12):
+    for _ in range(duration):
+        msg = random.choice(msgs)
         for s in spinner:
             print(f"\r\033[38;5;39m{s}\033[0m {msg}...", end="", flush=True)
             time.sleep(0.08)
@@ -207,6 +254,7 @@ def choose_api() -> None:
 
 
 def start_ui() -> None:
+    ensure_mcp_server()
     banner()
     choose_api()
 
@@ -216,12 +264,13 @@ def start_ui() -> None:
         if action == "Exit":
             print_agent("Goodbye!", "gray")
             print_agent("Keep building. Keep quirking.", "quirk")
+            stop_mcp_server()
             break
 
-        if action == "Show Tools":
+        if action.endswith("Tools"):
             print_agent("Available tools:", "green")
-            print("  • write_file   • read_file   • run_file")
-            print("  • delete_path  • copy_file   • get_file_info")
+            print_agent("  • write files   • read files   • run python", "text")
+            print_agent("  • delete files  • move files   • get folder structure", "text")
             continue
 
         if action == "Ask Quirk":
@@ -234,7 +283,7 @@ def start_ui() -> None:
                 print_agent("No prompt entered.", "yellow")
                 continue
 
-            thinking_animation()
+            thinking_animation(glitch, duration=5)
             asyncio.run(run_quirk(question))
 
             again = questionary.confirm(
@@ -257,6 +306,8 @@ def main():
         print_agent("\nInterrupted.", "yellow")
     except Exception as e:
         print_agent(f"Error: {e}", "yellow")
+    finally:
+        stop_mcp_server()
 
 if __name__ == "__main__":
     main()

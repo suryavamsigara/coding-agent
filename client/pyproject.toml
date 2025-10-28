@@ -22,5 +22,3 @@ dependencies = [
 [project.scripts]
 quirk = "quirk.cli:main"
 
-[project.optional-dependencies]
-dev = ["black", "ruff"]
