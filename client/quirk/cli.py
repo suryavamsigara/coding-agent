@@ -14,17 +14,19 @@ from mcp import ClientSession
 
 BACKEND_URL = "http://127.0.0.1:8000/chat"
 MCP_SERVER_URL = "http://127.0.0.1:9000/mcp"
-MAX_ITERS = 8
+MAX_ITERS = 12 # will put this in backend later
 
 mcp_process = None
 
 tool_actions = {
     "get_file_info": "Scanning Files...",
     "read_file": "Reading File Contents..",
-    "write_file": "Writing.....",
+    "write_file": "Writing...",
     "delete_path": "Deleting..",
     "copy_file": "Copying File...",
     "run_file": "Executing Script..",
+    "create_directory": "Creating folder",
+    "rename_path": "Renaming path..",
     "_default": "Quirking"
 }
 
@@ -52,16 +54,19 @@ def ensure_mcp_server():
             print_agent("MCP server failed to start", "yellow")
     except Exception as e:
         print_agent(f"Error starting MCP server: {e}", "yellow")
+        print_agent("Cannot perform file operations.", "yellow")
 
 def stop_mcp_server():
     global mcp_process
     if mcp_process and mcp_process.poll() is None:
-        print_agent("Stoppign MCP server...", "gray")
+        print_agent("Stopping MCP server...", "gray")
         mcp_process.terminate()
         try:
             mcp_process.wait(timeout=2)
         except subprocess.TimeoutExpired:
+            print_agent("MCP server not responding. Forcing kill..", "yellow")
             mcp_process.kill()
+            mcp_process.wait()
         print_agent("MCP server stopped", "gray")
 
 async def safe_input(prompt: str) -> str:
@@ -80,7 +85,6 @@ async def run_quirk(prompt: str):
                 await session.initialize()
                 tools_obj = await session.list_tools()
                 tools_list = [tool.model_dump() for tool in tools_obj.tools]
-                print(len(tools_list))
     except Exception as e:
         print_agent(f"MCP server failed to start: {e}", "yellow")
         return
@@ -98,11 +102,11 @@ async def run_quirk(prompt: str):
             }
 
             try:
-                resp = await client.post(BACKEND_URL, json=payload, timeout=40)
+                resp = await client.post(BACKEND_URL, json=payload, timeout=60)
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
-                print_agent(f"Error connecting to backend at {BACKEND_URL}: {e}", "yellow")
+                print_agent(f"Error connecting to backend at: {e}", "yellow")
                 return
 
             current_prompt = None
@@ -111,7 +115,7 @@ async def run_quirk(prompt: str):
             session_id = data.get("session_id")
 
             if data.get("final_answer"):
-                print_agent(data['final_answer'])
+                print_agent(data['final_answer'], "text")
                 return
 
             elif data.get("tool_call"):
@@ -160,6 +164,22 @@ async def run_quirk(prompt: str):
 
             print_agent("No tool call or final response. Stopping..", "gray")
             return
+        
+        print_agent(f"Maximum steps ({MAX_ITERS}) reached. Forcing final answer.", "yellow")
+        try:
+            await client.post(
+                BACKEND_URL,
+                json={
+                    "prompt": "Maximum steps reached. Summarize progress and return final answer immediately.",
+                    "cwd": cwd,
+                    "session_id": session_id,
+                    "tool_result": None,
+                    "tools_list": None
+                },
+                timeout=60
+            )
+        except Exception as e:
+            print_agent(f"Failed to send final prompt: {e}", "yellow")
 
 quirk_style = Style(
     [
@@ -256,6 +276,7 @@ def choose_api() -> None:
 
 def start_ui() -> None:
     ensure_mcp_server()
+    time.sleep(1.5)
     banner()
     choose_api()
 
