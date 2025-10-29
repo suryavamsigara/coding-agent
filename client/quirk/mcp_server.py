@@ -1,108 +1,124 @@
 import os
 import subprocess
 import shutil
+from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from quirk.config import get_working_directory
 
 mcp = FastMCP("Quirk Tools", host="127.0.0.1", port=9000)
 
+EXCLUDE_DIRS = {"venv", ".venv", "env", "node_modukles", ".git", "__pycache__"}
+
 @mcp.tool()
 def get_file_info(directory: str = "."):
-    """List all files and directories recursively starting from a given directory."""
-    absolute_working_directory = get_working_directory()
-    absolute_directory = os.path.abspath(os.path.join(absolute_working_directory, directory))
-    working_directory = os.path.dirname(absolute_working_directory)
+    """
+    Return recursive directory and file info relative to the working directory. (skips dev/system dirs).
+    """
+    working_dir: Path = get_working_directory()
+    target_dir: Path = (working_dir / directory).resolve()
 
-    if not os.path.isdir(absolute_working_directory):
-        return f"Error: Working directory '{working_directory}' does not exist."
-
-    if not absolute_directory.startswith(absolute_working_directory):
-        return f"Error: Directory '{directory}' is not in working directory."
+    if not target_dir.relative_to(working_dir):
+        return {"error": f"Directory '{directory}' is outside working directory."}
     
-    if not os.path.isdir(absolute_directory):
-        return f"Error: Directory '{directory}' does not exist"
+    if not target_dir.exists():
+        return {"error": f"Directory '{directory}' doesn't exist"}
     
-    file_paths = []
-    dir_paths = []
+    if not target_dir.is_dir():
+        return {"error": f"'{directory}' is not a directory."}
     
-    for root, dirs, files in os.walk(absolute_directory):
-        relative_root = os.path.relpath(root, absolute_directory)
+    directories = []
+    files = []
+    
+    for path in target_dir.rglob("*"):
+        rel = path.relative_to(target_dir)
 
-        for file in files:
-            if relative_root == ".":
-                file_paths.append(file)
-            else:
-                file_paths.append(os.path.join(relative_root, file))
-        
-        for dir_name in dirs:
-            if relative_root == ".":
-                dir_paths.append(dir_name)
-            else:
-                dir_paths.append(os.path.join(relative_root, dir_name))
+        if any(part in EXCLUDE_DIRS for part in rel.parts):
+            continue
 
-    return {"directories": sorted(dir_paths), "files": sorted(file_paths)}
+        if path.is_file():
+            files.append(str(rel))
+        elif path.is_dir():
+            directories.append(str(rel))
+
+    return {"directories": sorted(directories), "files": sorted(files)}
+
+
+@mcp.tool()
+def create_directory(path: str):
+    """Create a directory (including parents)."""
+    base_dir: Path = get_working_directory()
+    if not base_dir.is_dir():
+        return f"Error: Working dir '{base_dir}' doesn't exist."
+    
+    target_dir: Path = (base_dir / path).resolve()
+
+    if not target_dir.is_relative_to(base_dir):
+        return f"Error: '{path}' is outside working directory."
+    
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return f"Directory created: {path}"
+    except Exception as e:
+        return f"Error creating directory '{path}': {e}"
 
 
 @mcp.tool()
 def read_file(file_path: str, max_lines: int | None = None):
-    """Reads the contents of a specified file. Can optionally read only the first N lines"""
-    absolute_working_directory = get_working_directory()
-    working_directory = os.path.dirname(absolute_working_directory)
-
-    if not os.path.isdir(absolute_working_directory):
-        return f"Working directory '{working_directory}' does not exist."
+    """
+    Reads the contents of a specified file. Can optionally read only the first N lines
+    """
     
-    absolute_file_path = os.path.join(absolute_working_directory, file_path)
+    base_dir: Path = get_working_directory()
 
-    if not absolute_file_path.startswith(absolute_working_directory):
-        return f"File '{file_path}' is not in working directory."
+    if not base_dir.is_dir():
+        return f"Error: Working dir '{base_dir}' doesn't exist."
+    
+    target_path: Path = (base_dir / file_path).resolve()
 
-    if not os.path.isfile(absolute_file_path):
+    if not target_path.is_relative_to(base_dir):
+        return f"Error: File '{file_path}' is outside the working directory."
+    
+    if not target_path.is_file():
         return f"Error: '{file_path}' does not exist or is not a file."
 
     try:
-        with open(absolute_file_path, 'r', encoding='utf-8') as f:
-            if max_lines is not None and max_lines > 0:
-                lines = []
-                truncated = False
+        text = []
+        with target_path.open("r", encoding="utf-8") as f:
+            if max_lines and max_lines > 0:
                 for i, line in enumerate(f):
                     if i >= max_lines:
-                        truncated = True
+                        text.append(f"\nFile truncated at {max_lines} lines")
                         break
-                    lines.append(line)
-                file_content = "".join(lines)
-                if truncated:
-                    file_content += f"\n File truncated at {max_lines} lines"
+                    text.append(line)
+                return "".join(text)
             else:
-                file_content = f.read()
-        return file_content
-
+                return f.read()
     except Exception as e:
-        return f"Error: could not read file '{file_path}', details: {e}"
-    
+        return f"Error reading file '{file_path}': {e}"
+
 
 @mcp.tool()
 def write_file(file_path: str, content: str):
-    """Create a new file or overwrite an existing file with the specified content in the working directory. Can create required parent directories too."""
-    absolute_working_directory = get_working_directory()
+    """
+    Create a new file or overwrite an existing file with the specified content inside the working directory. Automatically creates needed parent folders.
+    """
+    base_dir: Path = get_working_directory()
 
-    if not os.path.isdir(absolute_working_directory):
-        return f"Working directory '{working_directory}' does not exist."
+    if not base_dir.is_dir():
+        return f"Error: Working directory '{base_dir}' does not exist."
     
-    working_directory = os.path.dirname(absolute_working_directory)
-    absolute_file_path = os.path.join(absolute_working_directory, file_path)
+    target_path: Path = (base_dir / file_path).resolve()
 
-    if not absolute_file_path.startswith(absolute_working_directory):
-        return f"Error: '{file_path}' does not exist or is not a file."
+    if not target_path.is_relative_to(base_dir):
+        return f"Error: '{file_path} is outside the working directory."
     
-    os.makedirs(os.path.dirname(absolute_file_path), exist_ok=True)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with open(absolute_file_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        target_path.write_text(content, encoding="utf-8")
         return f"Successfully wrote to '{file_path}'"
     except Exception as e:
-        return f"Failed to write to '{file_path}', {e}"
+        return f"Failed to write to '{file_path}': {e}"
 
 
 @mcp.tool()
@@ -144,60 +160,85 @@ def run_file(file_path: str, args = None):
 
 @mcp.tool()
 def delete_path(path: str):
-    """Delete a file or directory."""
-    absolute_working_directory = get_working_directory()
-    working_directory = os.path.dirname(absolute_working_directory)
+    """
+    Delete a file or directory inside the working directory.
+    """
+    base_dir: Path = get_working_directory()
 
-    if not os.path.isdir(absolute_working_directory):
-        return f"Error: Working directory '{working_directory}' does not exist."
+    if not base_dir.is_dir():
+        return f"Error: Working directory '{base_dir}' does not exist."
     
-    absolute_path = os.path.join(absolute_working_directory, path)
+    target_path: Path = (base_dir / path).resolve()
 
-    if not absolute_path.startswith(absolute_working_directory):
-        return f"Error: '{path}' is not in working directory"
+    if not target_path.is_relative_to():
+        return f"Error: '{path}' is outside the working directory."
     
-    if not os.path.exists(absolute_path):
+    if not target_path.exists():
         return f"Error: '{path}' does not exist."
     
     try:
-        if os.path.isfile(absolute_path):
-            os.remove(absolute_path)
-            return f"Successfully deleted the file '{path}'"
-        elif os.path.isdir(absolute_path):
-            shutil.rmtree(absolute_path)
-            return f"Successfully deleted the directory '{path}'"
+        if target_path.is_file():
+            target_path.unlink()
+            return f"Successfully deleted file '{path}'"
+        elif target_path.is_dir():
+            shutil.rmtree(target_path)
+            return f"Successfully deleted directory '{path}'"
+        else:
+            return f"Error: Unknown file type for '{path}'"
     except Exception as e:
-        return f"Error: Could not delete '{path}' - {e}"
+        return f"Error: Could not delete '{path}': {e}"
     
 
 @mcp.tool()
 def copy_file(source: str, destination: str):
-    """Delete a file or directory."""
-    absolute_working_directory = get_working_directory()
-    working_directory = os.path.dirname(absolute_working_directory)
-
-    if not os.path.isdir(absolute_working_directory):
-        return f"Working directory '{working_directory}' does not exist."
+    """Copy a file or directory inside the working directory."""
+    base_dir: Path = get_working_directory()
+    src_path: Path = (base_dir / source).resolve()
+    dest_path: Path = (base_dir / destination).resolve()
     
-    absolute_source_path = os.path.join(absolute_working_directory, source)
-    absolute_destination_path = os.path.join(absolute_working_directory, destination)
-
-    if not absolute_source_path.startswith(absolute_working_directory) or not absolute_destination_path.startswith(absolute_working_directory):
-        return f"Error: Access outside the working directory is denied."
+    if not src_path.is_relative_to(base_dir):
+        return f"Error: '{source}' is outside the working directory."
+    if not dest_path.is_relative_to(base_dir):
+        return f"Error: '{destination}' is outside the working directory."
     
-    if not os.path.isfile(absolute_source_path):
-        return f"Error: '{source}' does not exist or is not a file."
+    if not src_path.exists():
+        return f"Error: Source '{source}' doesn't exist."
     
     try:    
-        if os.path.isdir(absolute_destination_path):
-            shutil.copy(absolute_source_path, absolute_destination_path)
-            return f"Successfully copied '{source}' into directory '{destination}'."
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if src_path.is_file():
+            shutil.copy2(src_path, dest_path)
         else:
-            os.makedirs(os.path.dirname(absolute_destination_path), exist_ok=True)
-            shutil.copy(absolute_source_path, absolute_destination_path)
-            return f"Copied '{source}' to '{destination}'."
+            shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+        return f"Copied '{source}' to '{destination}'"
     except Exception as e:
         return f"Error: Could not copy the file: {e}"
+    
+@mcp.tool()
+def rename_path(old_path: str, new_path: str):
+    """
+    Rename or move a file/directory within working directory.
+    """
+    base_dir: Path = get_working_directory()
+    old: Path = (base_dir / old_path).resolve()
+    new: Path = (base_dir / new_path).resolve()
+    
+    if not old.is_relative_to(base_dir):
+        return f"Error: '{old_path}' is outside the working directory."
+    if not new.is_relative_to(base_dir):
+        return f"Error: '{new_path}' is outside the working directory."
+    
+    if not old.exists():
+        return f"Error: '{old_path}' doesn't exist."
+    
+    new.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        old.rename(new)
+        return f"Renamed/moved '{old_path}' to '{new_path}'"
+    except Exception as e:
+        return f"Error: Rename/move failed: {e}"
 
 if __name__=="__main__":
     mcp.run(transport="streamable-http")

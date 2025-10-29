@@ -107,5 +107,5 @@ class CodingAgent:
             }
 
         text = candidate.content.parts[0].text if candidate.content.parts else None
-        return {"final_answer": text or "⚠ Empty answer"}
+        return {"final_answer": text or "Empty answer"}
 

@@ -1,10 +1,11 @@
 import os
 import sys, time
-import json
 import asyncio
 import subprocess
 import socket
 import httpx
+import argparse
+import importlib.metadata
 import random
 import questionary
 from questionary import Style
@@ -20,7 +21,7 @@ mcp_process = None
 tool_actions = {
     "get_file_info": "Scanning Files...",
     "read_file": "Reading File Contents..",
-    "write_file": "Applying Modifications...",
+    "write_file": "Writing.....",
     "delete_path": "Deleting..",
     "copy_file": "Copying File...",
     "run_file": "Executing Script..",
@@ -79,6 +80,7 @@ async def run_quirk(prompt: str):
                 await session.initialize()
                 tools_obj = await session.list_tools()
                 tools_list = [tool.model_dump() for tool in tools_obj.tools]
+                print(len(tools_list))
     except Exception as e:
         print_agent(f"MCP server failed to start: {e}", "yellow")
         return
@@ -100,7 +102,7 @@ async def run_quirk(prompt: str):
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
-                print(f"Error connecting to backend at {BACKEND_URL}: {e}")
+                print_agent(f"Error connecting to backend at {BACKEND_URL}: {e}", "yellow")
                 return
 
             current_prompt = None
@@ -156,7 +158,7 @@ async def run_quirk(prompt: str):
                     }
                 continue
 
-            print("No tool call or final response. Stopping..")
+            print_agent("No tool call or final response. Stopping..", "gray")
             return
 
 quirk_style = Style(
@@ -174,15 +176,14 @@ quirk_style = Style(
     ]
 )
 
-glitch = ["Decoding", "Thinking", "Re-routing synapses", "Quantum whispering",
-          "Breaking reality", "Aligning bits", "Quirking"]
+glitch = ["Decoding", "Thinking", "Quirking"]
 
 def banner() -> None:
     title = "Quirk"
     line = "─" * (len(title) + 8)
-    print(f"\n\033[38;5;39m{line}\033[0m")
-    print(f"\033[1m\033[38;5;39m   {title}   \033[0m")
-    print(f"\033[38;5;39m{line}\033[0m\n")
+    print(f"\n\033[38;5;180m{line}\033[0m")
+    print(f"\033[1m\033[38;5;179m   {title}   \033[0m")
+    print(f"\033[38;5;180m{line}\033[0m\n")
 
 def main_menu() -> str:
     return questionary.select(
@@ -283,7 +284,7 @@ def start_ui() -> None:
                 print_agent("No prompt entered.", "yellow")
                 continue
 
-            thinking_animation(glitch, duration=5)
+            thinking_animation(glitch, duration=8)
             asyncio.run(run_quirk(question))
 
             again = questionary.confirm(
@@ -297,8 +298,21 @@ def start_ui() -> None:
                 break
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
-        print("Quirk is ready! Run: quirk")
+    parser = argparse.ArgumentParser(
+        prog="quirk",
+        description="Quirk - Smart coding assistant"
+    )
+
+    parser.add_argument("-v", "--version", action="store_true", help="Show installed version")
+
+    args = parser.parse_args()
+
+    if args.version:
+        try:
+            version = importlib.metadata.version("quirk")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        print(f"quirk {version}")
         return
     try:
         start_ui()
