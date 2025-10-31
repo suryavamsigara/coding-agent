@@ -81,65 +81,59 @@ async def run_quirk(prompt: str):
 
     try:
         async with streamablehttp_client(MCP_SERVER_URL) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                tools_obj = await session.list_tools()
+            async with ClientSession(read_stream, write_stream) as mcp_session:
+                await mcp_session.initialize()
+                tools_obj = await mcp_session.list_tools()
                 tools_list = [tool.model_dump() for tool in tools_obj.tools]
-    except Exception as e:
-        print_agent(f"MCP server failed to start: {e}", "yellow")
-        return
 
-    current_prompt = prompt
+            current_prompt = prompt
 
-    async with httpx.AsyncClient() as client:
-        for _ in range(MAX_ITERS):
-            payload = {
-                "prompt": current_prompt,
-                "cwd": cwd,
-                "session_id": session_id,
-                "tool_result": tool_result_payload,
-                "tools_list": tools_list
-            }
+            async with httpx.AsyncClient() as client:
+                for _ in range(MAX_ITERS):
+                    payload = {
+                        "prompt": current_prompt,
+                        "cwd": cwd,
+                        "session_id": session_id,
+                        "tool_result": tool_result_payload,
+                        "tools_list": tools_list
+                    }
 
-            try:
-                resp = await client.post(BACKEND_URL, json=payload, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as e:
-                print_agent(f"Error connecting to backend at: {e}", "yellow")
-                return
+                    try:
+                        resp = await client.post(BACKEND_URL, json=payload, timeout=60)
+                        resp.raise_for_status()
+                        data = resp.json()
+                    except Exception as e:
+                        print_agent(f"Error connecting to backend at: {e}", "yellow")
+                        return
 
-            current_prompt = None
-            tools_list = None
-            tool_result_payload = None
-            session_id = data.get("session_id")
+                    current_prompt = None
+                    tools_list = None
+                    tool_result_payload = None
+                    session_id = data.get("session_id")
 
-            if data.get("final_answer"):
-                print_agent(data['final_answer'], "text")
-                return
+                    if data.get("final_answer"):
+                        print_agent(data['final_answer'], "text")
+                        return
 
-            elif data.get("tool_call"):
-                call = data["tool_call"]
-                tool_name = call["tool_name"]
-                params = call.get("params", {})
-                action_msg = tool_actions.get(tool_name, tool_actions["_default"])
-                print_agent(action_msg, "quirk")
+                    elif data.get("tool_call"):
+                        call = data["tool_call"]
+                        tool_name = call["tool_name"]
+                        params = call.get("params", {})
+                        action_msg = tool_actions.get(tool_name, tool_actions["_default"])
+                        print_agent(action_msg, "quirk")
 
-                if tool_name in {"write_file", "delete_path"}:
-                    confirm = (await safe_input("Apply this change? [y/N]: ")).strip().lower()
-                    if confirm != "y":
-                        print_agent("request denied", "yellow")
-                        tool_result_payload = {
-                            "tool_name": tool_name,
-                            "response": {"error": "User denied write request"}
-                        }
-                        continue
+                        if tool_name in {"write_file", "delete_path"}:
+                            confirm = (await safe_input("Apply this change? [y/N]: ")).strip().lower()
+                            if confirm != "y":
+                                print_agent("request denied", "yellow")
+                                tool_result_payload = {
+                                    "tool_name": tool_name,
+                                    "response": {"error": "User denied write request"}
+                                }
+                                continue
 
-                try:
-                    async with streamablehttp_client(MCP_SERVER_URL) as (read, write, _):
-                        async with ClientSession(read, write) as session:
-                            await session.initialize()
-                            result = await session.call_tool(tool_name, params)
+                        try:
+                            result = await mcp_session.call_tool(tool_name, params)
 
                             output = getattr(result, "content", None)
                             
@@ -154,32 +148,36 @@ async def run_quirk(prompt: str):
                                 "tool_name": tool_name,
                                 "response": item
                             }
-                except Exception as e:
-                    print_agent(f"Error {tool_actions.get(tool_name)}\n{e}", "yellow")
-                    tool_result_payload = {
-                        "tool_name": tool_name,
-                        "response": {"error": str(e)}
-                    }
-                continue
+                        except Exception as e:
+                            print_agent(f"Error {tool_actions.get(tool_name)}\n{e}", "yellow")
+                            tool_result_payload = {
+                                "tool_name": tool_name,
+                                "response": {"error": str(e)}
+                            }
+                        continue
 
-            print_agent("No tool call or final response. Stopping..", "gray")
-            return
-        
-        print_agent(f"Maximum steps ({MAX_ITERS}) reached. Forcing final answer.", "yellow")
-        try:
-            await client.post(
-                BACKEND_URL,
-                json={
-                    "prompt": "Maximum steps reached. Summarize progress and return final answer immediately.",
-                    "cwd": cwd,
-                    "session_id": session_id,
-                    "tool_result": None,
-                    "tools_list": None
-                },
-                timeout=60
-            )
-        except Exception as e:
-            print_agent(f"Failed to send final prompt: {e}", "yellow")
+                    print_agent("No tool call or final response. Stopping..", "gray")
+                    return
+                
+                else:
+                    print_agent(f"Maximum steps ({MAX_ITERS}) reached. Forcing final answer.", "yellow")
+                    try:
+                        await client.post(
+                            BACKEND_URL,
+                            json={
+                                "prompt": "Maximum steps reached. Summarize progress and return final answer immediately.",
+                                "cwd": cwd,
+                                "session_id": session_id,
+                                "tool_result": None,
+                                "tools_list": None
+                            },
+                            timeout=60
+                        )
+                    except Exception as e:
+                        print_agent(f"Failed to send final prompt: {e}", "yellow")
+    except Exception as e:
+        print_agent(f"MCP server failed to start: {e}", "yellow")
+        return
 
 quirk_style = Style(
     [
@@ -297,9 +295,10 @@ def start_ui() -> None:
 
         if action == "Ask Quirk":
             question = questionary.text(
-                "Your request",
+                "You",
                 style=quirk_style,
-                instruction="(type your prompt and press Enter)",
+                instruction="Esc+Enter",
+                multiline=True
             ).ask()
             if not question:
                 print_agent("No prompt entered.", "yellow")
