@@ -10,7 +10,7 @@ load_dotenv()
 
 
 class CodingAgent:
-    def __init__(self, session_id: str, model="gemini-2.0-flash-001"):
+    def __init__(self, session_id: str, tools_list: Optional[list[dict[str, Any]]], model="gemini-2.0-flash-001"):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("Gemini API key missing")
@@ -18,6 +18,7 @@ class CodingAgent:
         self.client = genai.Client(api_key=api_key)
         self.model = model
         self.session_id = session_id
+        self.tools_list = tools_list
         self.contents = []
         self.system_prompt = """
         You are "Quirk", an autonomous AI coding agent. Your entire purpose is to operate on the codebase in the working directory to fulfill the user's request.
@@ -35,7 +36,7 @@ class CodingAgent:
         ## Core Workflow & Constraints
         You MUST follow these rules precisely:
 
-        1.  **FIRST STEP:** Your first and only valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively**. Do not do anything else until you have this file list.
+        1.  **FIRST STEP:** Your first valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively**. You need files structure.
 
         2.  **ANALYZE:** Review the complete file structure from the `get_file_info` result and the user's request.
 
@@ -54,7 +55,6 @@ class CodingAgent:
 
     async def run(
         self,
-        tools_list: list[dict[str, Any]],
         prompt: Optional[str] = None,
         tool_result: Optional[dict[str, Any]] = None,
     ):
@@ -76,7 +76,7 @@ class CodingAgent:
                     name=t["name"],
                     description=t["description"],
                     parameters=t.get("inputSchema", {}),
-                ) for t in tools_list
+                ) for t in self.tools_list
             ]
         )
 

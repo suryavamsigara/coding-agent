@@ -9,85 +9,51 @@ app = FastAPI()
 
 SESSIONS: dict[str, CodingAgent] = {}
 
+class InitRequest(BaseModel):
+    tools_list: list[dict[str, Any]]
+
 class ChatRequest(BaseModel):
     prompt: Optional[str] = None
     cwd: Optional[str] = None
-    session_id: Optional[str] = None
+    session_id: str
     tool_result: Optional[dict[str, Any]] = None
-    tools_list: Optional[list[dict[str, Any]]] = None
 
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    agent: CodingAgent
-    tools: list[dict[str, Any]]
-
-    if request.session_id and request.session_id in SESSIONS:
-        print(f"Resuming session: {request.session_id}")
-        agent = SESSIONS[request.session_id]["agent"]
-        tools = SESSIONS[request.session_id]["tools"]
-
-    elif request.prompt and request.tools_list:
-        session_id = str(uuid.uuid4())
-        print(f"Starting new session: {session_id}")
-        agent = CodingAgent(session_id=session_id)
-        tools = request.tools_list
-
-        SESSIONS[session_id] = {"agent": agent, "tools": tools}
+@app.post("/api/init-session")
+async def tools(request: InitRequest):
+    session_id = str(uuid.uuid4())
+    print(f"Starting new session: {session_id}")
     
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"New session requires prompt and tools_list")
-    
-    response_data = await agent.run(
-        tools_list=tools,
-        prompt=request.prompt,
-        tool_result=request.tool_result
-    )
-
-    response_data["session_id"] = agent.session_id
-    return response_data
-
-if __name__ == "__main__":
-    print("Starting remote LLM backend simulation on http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
-
-
-
-
-
-
-
-
-
-
-
-"""
-def run_agent():
     try:
-       agent = CodingAgent()
+        agent = CodingAgent(session_id=session_id, tools_list=request.tools_list)
+        SESSIONS[session_id] = agent
+        return {"session_id": session_id}
     except Exception as e:
-        print(f"[Initialization Error] {e}")
-        sys.exit(1)
+        print(f"Error initializing agent: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-    while True:
-        try:
-            prompt = questionary.text("User: ").ask()
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
 
-            if prompt is None or prompt.lower() in ['exit', 'quit']:
-                print("\nExiting...")
-                break
+    agent = SESSIONS.get(request.session_id)
 
-            if not prompt.strip():
-                continue
-            agent.run(prompt)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found. Please initialize a new session."
+        )    
+    
+    try:
+        response_data = await agent.run(
+            prompt=request.prompt,
+            tool_result=request.tool_result
+        )
 
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            break
-        except Exception as e:
-            print("\nError: ", e)
-            pass
+        response_data["session_id"] = agent.session_id
+        return response_data
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 if __name__ == "__main__":
-    run_agent()
-"""
+    print("Starting backend server on http://127.0.0.1:8000")
+    uvicorn.run(app, host="127.0.0.1", port=8000)
 
