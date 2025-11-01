@@ -19,8 +19,8 @@ MCP_SERVER_URL = "http://127.0.0.1:9000/mcp"
 MAX_ITERS = 12 # will put this in backend later
 
 tool_actions = {
-    "get_file_info": "Scanning Files...",
-    "read_file": "Reading File Contents..",
+    "get_file_info": "Scanning Files",
+    "read_file": "Reading File Contents",
     "write_file": "Writing...",
     "delete_path": "Deleting..",
     "copy_file": "Copying File...",
@@ -51,7 +51,7 @@ class QuirkApp:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
             )
-            time.sleep(2)
+            time.sleep(1)
             if is_port_in_use(9000):
                 print_agent("MCP server started", "gray")
             else:
@@ -74,15 +74,6 @@ class QuirkApp:
     async def _safe_input(self, prompt: str):
         """Lets us use input() without freezing the async event loop"""
         return await asyncio.to_thread(input, prompt)
-    
-    async def _thinking_animation(self, msgs, duration=10) -> None:
-        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        for _ in range(duration):
-            msg = random.choice(msgs)
-            for s in spinner:
-                print(f"\r\033[38;5;39m{s}\033[0m {msg}...", end="", flush=True)
-                await asyncio.sleep(0.08)
-        print("\r" + " " * 40 + "\r", end="")
 
     async def run_quirk(self, prompt: str, mcp_session: ClientSession):
         """
@@ -125,6 +116,10 @@ class QuirkApp:
                     tool_name = call["tool_name"]
                     params = call.get("params", {})
                     action_msg = tool_actions.get(tool_name, tool_actions["_default"])
+                    
+                    if data.get("thought"):
+                        print_agent(data["thought"], "text")
+
                     print_agent(action_msg, "quirk")
 
                     if tool_name in {"write_file", "delete_path"}:
@@ -136,9 +131,14 @@ class QuirkApp:
                                 "response": {"error": "User denied write request"}
                             }
                             continue
+
+                    status_task = None
                         
                     try:
+                        status_task = asyncio.create_task(self._show_tool_status(action_msg))
                         result = await mcp_session.call_tool(tool_name, params)
+                        status_task.cancel()
+                        await asyncio.wait([status_task], timeout=0.2)
                         output = getattr(result, "content", None)
                         
                         if isinstance(output, list) and output:
@@ -146,14 +146,15 @@ class QuirkApp:
                         else:
                             item = str(output)
 
-                        print_agent("✔ Done", "gray")
-
                         tool_result_payload = {
                             "tool_name": tool_name,
                             "response": item
                         }
                     except Exception as e:
-                        print_agent(f"Error {tool_actions.get(tool_name)}\n{e}", "yellow")
+                        if status_task and not status_task.done():
+                            status_task.cancel()
+                            await asyncio.wait([status_task], timeout=0.2)
+                        print_agent(f"Error {action_msg}\n{e}", "yellow")
                         tool_result_payload = {
                             "tool_name": tool_name,
                             "response": {"error": str(e)}
@@ -228,6 +229,29 @@ class QuirkApp:
             print_agent(f"Could not connnect to MCP server: {e}", "yellow")
             print_agent("Chat session exited", "gray")
 
+    async def _thinking_animation(self, msgs, duration=10) -> None:
+        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        for _ in range(duration):
+            msg = random.choice(msgs)
+            for s in spinner:
+                print(f"\r\033[38;5;39m{s}\033[0m {msg}...", end="", flush=True)
+                await asyncio.sleep(0.08)
+        print("\r" + " " * 40 + "\r", end="")
+
+    async def _show_tool_status(self, action_message: str):
+        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        i = 0
+        try:
+            while True:
+                s = spinner[i % len(spinner)]
+                print(f"\r\033[38;5;39m{s}\033[0m {action_message}..", end="", flush=True)
+                await asyncio.sleep(0.08)
+                i += 1
+        except asyncio.CancelledError:
+            print("\r" + " " * (len(action_message) + 10) + "\r", end="")
+            print_agent(f"✔ Done", "gray")
+            raise
+
     async def _main_menu(self) -> str:
         return await questionary.select(
             "Action",
@@ -245,8 +269,8 @@ class QuirkApp:
         ans = await questionary.select(
             "Gemini model",
             choices=[
-                "Yes – use my own API key (smarter model)",
-                "No – free version",
+                "Yes - my own API key (can get a smarter model)",
+                "No - free version",
             ],
             style=quirk_style,
             instruction="(↑/↓, Enter)",
@@ -267,7 +291,7 @@ class QuirkApp:
         
     async def run(self):
         self._ensure_mcp_process()
-        time.sleep(1.5)
+        time.sleep(0.8)
         banner()
         await self._choose_api()
 

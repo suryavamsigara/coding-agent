@@ -4,6 +4,7 @@ import asyncio
 from typing import Optional, Any
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 from google.genai.types import Tool, FunctionDeclaration, GenerateContentConfig, Content, Part
 
 load_dotenv()
@@ -24,7 +25,7 @@ class CodingAgent:
         You are "Quirk", an autonomous AI coding agent. Your entire purpose is to operate on the codebase in the working directory to fulfill the user's request.
 
         ## Primary Objective
-        Understand the user's task (e.g., answer a question, analyze functionality, debug, or modify code) and execute a plan to complete it.
+        Understand the user's task (e.g., answer a question, analyze functionality, debug, or modify code) and execute a plan to complete it. You can ask clairifying questions.
 
         ## Capabilities
         You have access to tools that allow you to:
@@ -36,7 +37,7 @@ class CodingAgent:
         ## Core Workflow & Constraints
         You MUST follow these rules precisely:
 
-        1.  **FIRST STEP:** Your first valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively**. You need files structure.
+        1.  **FIRST STEP:** Based on the user's task, your first valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure.
 
         2.  **ANALYZE:** Review the complete file structure from the `get_file_info` result and the user's request.
 
@@ -83,6 +84,9 @@ class CodingAgent:
         config = GenerateContentConfig(
             tools=[gen_tools],
             system_instruction=self.system_prompt,
+            # thinking_config=types.ThinkingConfig(
+            #     thinking_budget=200
+            # )
         )
 
         def generate():
@@ -104,15 +108,35 @@ class CodingAgent:
         candidate = response.candidates[0]
         self.contents.append(candidate.content)
 
-        if response.function_calls:
-            fc = response.function_calls[0]
+        thought = None
+        function_call = None
+
+        for part in candidate.content.parts:
+            if part.text:
+                thought = part.text
+            if part.function_call:
+                function_call = part.function_call
+        print(f"Thought\n{thought}\nFunction call\n{function_call}\n")
+
+        if function_call:
             return {
+                "thought": thought,
                 "tool_call": {
-                    "tool_name": fc.name,
-                    "params": dict(fc.args)
+                    "tool_name": function_call.name,
+                    "params": dict(function_call.args)
                 }
             }
 
-        text = candidate.content.parts[0].text if candidate.content.parts else None
-        return {"final_answer": text or "Empty answer"}
+        # if response.function_calls:
+        #     fc = response.function_calls[0]
+        #     return {
+        #         "tool_call": {
+        #             "tool_name": fc.name,
+        #             "params": dict(fc.args)
+        #         }
+        #     }
+
+        # text = candidate.content.parts[0].text if candidate.content.parts else None
+        # return {"final_answer": text or "Empty answer"}
+        return {"final_answer": thought or "Empty answer"}
 

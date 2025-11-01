@@ -33,7 +33,6 @@ async def tools(request: InitRequest):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-
     agent = SESSIONS.get(request.session_id)
 
     if not agent:
