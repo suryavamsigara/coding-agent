@@ -21,42 +21,31 @@ class CodingAgent:
         self.tools_list = tools_list
         self.contents = []
         self.system_prompt = """
-        You are "Quirk", an autonomous AI coding agent. Your entire purpose is to operate on the codebase in the working directory to fulfill the user's request.
+        You are "Quirk", an autonomous AI coding agent that operates on the codebase in the working directory.
 
-        ## Primary Objective
-        Understand the user's task (e.g., answer a question, analyze functionality, debug, or modify code) and execute a plan to complete it. You can ask clairifying questions.
+        ## Rules
+        1. **FIRST ACTION:** Call `get_file_info` with `directory='.'` if you need to know the file structure.
 
-        ## Capabilities
-        You have access to tools that allow you to:
-        - List files and directories
-        - Read and write file contents
-        - Create, delete, copy, and move files or directories
+        2. **ONE TOOL PER TURN:** Return exactly ONE tool call per response. Never return multiple tools.
+
+        3. **BE BRIEF:** Before calling a tool, output short summary about what you're doing.
+        
+        4. **NO EXPLANATIONS:** Do NOT explain your plan or reasoning in detail. Just act.
+
+        5. **AUTO-DECIDE:** Never ask which file to read/modify. Analyze and decide yourself.
+
+        6. **RELATIVE PATHS:** All paths relative to working directory (e.g., `src/main.py`).
+
+        7. **COMPLETION:** When done, provide a brief final answer.
+
+        8. **NO MARKDOWN:** Plain text only. No `**bold**` or `*italic*`.
+
+        ## Available Actions
+        - List/read/write/delete files
+        - Create/rename/copy/move files and directories  
         - Execute Python scripts
 
-        ## Core Workflow & Constraints
-        You MUST follow these rules precisely:
-
-        1.  **FIRST STEP:** Based on the user's task, your first action might be to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure. You must call it to know the paths of files to call tools.
-
-        2.  **ANALYZE:** Review the complete file structure from the `get_file_info` result and the user's request.
-
-        3.  **PLAN:** Formulate a concise, step-by-step internal plan to achieve the user's goal.
-
-        4.  **EXECUTE (One Tool at a Time):** You MUST return only **one tool call per turn**.
-
-        5.  **AUTONOMY:** Be self-directed. Automatically decide which files to read, modify, or execute based on your plan. Do not ask the user for file names; find them yourself.
-
-        6.  **PATHING:** All file paths MUST be relative to the working directory (e.g., `src/main.py`).
-
-        7. **STATUS UPDATES:** Before each tool call, output a short summary describing what you're about to do.
-
-        8.  **EFFICIENCY:** Never perform unnecessary or repetitive tool calls.
-
-        9.  **COMPLETION:** When your plan is complete and you have the full answer or have finished the task, provide a final, comprehensive response to the user instead of calling another tool.
-
-        10. Based on user's task, you can create different files and folders to build and execute the plan. You need to know the CONTEXT before starting, so READ RELEVANT files FIRST.
-        
-        Do not use Markdown (like `**` or `*`). All output must be plain text.
+        Work autonomously. Be decisive. Be concise.
         """
         self.gen_tools = Tool(
             function_declarations=[
@@ -89,7 +78,7 @@ class CodingAgent:
             tools=[self.gen_tools],
             system_instruction=self.system_prompt,
             thinking_config=types.ThinkingConfig(
-                thinking_budget=128,
+                thinking_budget=64,
                 include_thoughts=False
             )
         )
@@ -116,11 +105,11 @@ class CodingAgent:
                     buffered_parts.extend(chunk.parts)
                     print("\nINSIDE\n ", part)
 
-                    if part.text:
-                        yield json.dumps({"final_answer_chunk": part.text}) + "\n"
-                    
                     if part.function_call:
                         is_tool_call = True
+
+                    if part.text and not is_tool_call:
+                        yield json.dumps({"final_answer_chunk": part.text}) + "\n"
         
         print("\nOUTSIDE\n ", buffered_parts)
 

@@ -178,6 +178,14 @@ class QuirkApp:
                     await asyncio.wait([thinking_task], timeout=0.2)
                 print_agent(f"Error connecting to backend at: {e}", "yellow")           
                 return
+            finally:
+                # Always ensure thinking task is cancelled
+                if thinking_task and not thinking_task.done():
+                    thinking_task.cancel()
+                    try:
+                        await thinking_task
+                    except asyncio.CancelledError:
+                        pass
 
             if tool_result_payload:
                 continue
@@ -234,25 +242,53 @@ class QuirkApp:
                     except Exception as e:
                         print_agent(f"Could not initialize backend session: {e}", "yellow")
                         return
+                    
+                    thinking_task = None
 
                     while True:
-                        question = await questionary.text(
-                            "You",
-                            style=quirk_style,
-                            instruction="",
-                            multiline=True,
-                        ).ask_async()
+                        try:
+                            question = await questionary.text(
+                                "You",
+                                style=quirk_style,
+                                instruction="",
+                                multiline=True,
+                            ).ask_async()
 
-                        if not question:
-                            continue
+                            if not question:
+                                continue
 
-                        if question.strip().lower() in ("/exit", "/back"):
-                            print_agent("Exiting chat session..", "gray")
+                            if question.strip().lower() in ("/exit", "/back"):
+                                print_agent("Exiting chat session..", "gray")
+                                break
+
+                            thinking_task = asyncio.create_task(self._thinking_animation(glitch))
+
+                            await self.run_quirk(question, mcp_session, thinking_task)
+
+                            if thinking_task and not thinking_task.done():
+                                thinking_task.cancel()
+                                try:
+                                    await thinking_task
+                                except asyncio.CancelledError:
+                                    pass
+                        except asyncio.CancelledError:
+                            if thinking_task and not thinking_task.done():
+                                thinking_task.cancel()
+                                try:
+                                    await thinking_task
+                                except asyncio.CancelledError:
+                                    pass
+                            raise
+                    
+                        except KeyboardInterrupt:
+                            print_agent("\nInterrupted by user", "yellow")
+                            if thinking_task and not thinking_task.done():
+                                thinking_task.cancel()
+                                try:
+                                    await thinking_task
+                                except asyncio.CancelledError:
+                                    pass
                             break
-
-                        thinking_task = asyncio.create_task(self._thinking_animation(glitch))
-
-                        await self.run_quirk(question, mcp_session, thinking_task)
         except Exception as e:
             print_agent(f"Could not connnect to MCP server: {e}", "yellow")
             print_agent("Chat session exited", "gray")
