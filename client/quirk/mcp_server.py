@@ -7,7 +7,7 @@ from quirk.config import get_working_directory
 
 mcp = FastMCP("Quirk Tools", host="127.0.0.1", port=9000)
 
-EXCLUDE_DIRS = {"venv", ".venv", "env", "node_modukles", ".git", "__pycache__"}
+EXCLUDE_DIRS = {"venv", ".venv", "env", "node_modules", ".git", "__pycache__", "package-lock.json"}
 
 @mcp.tool()
 def get_file_info(directory: str = "."):

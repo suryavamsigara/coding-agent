@@ -52,7 +52,7 @@ class CodingAgent:
 
         8.  **COMPLETION:** When your plan is complete and you have the full answer or have finished the task, provide a final, comprehensive response to the user instead of calling another tool.
 
-        If the user's task is to create projects, you can create different files and folders to build and execute the plan.
+        9. IBased on user's task, you can create different files and folders to build and execute the plan. You need to know the CONTEXT before starting, so READ RELEVANT files FIRST.
 
         When you need to use a tool, provide a brief, single-line 'thought' (e.g., 'Okay, I'll read that file.') *before* you call the tool.
         
