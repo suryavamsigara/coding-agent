@@ -333,6 +333,7 @@ class QuirkApp:
                 print_agent("Available tools:", "green")
                 print_agent("  • write files    • read files    • run python", "text")
                 print_agent("  • delete files   • move files    • get folder structure", "text")
+                print_agent("  • copy files    • rename path    • create dir", "text")
                 continue
 
             if action == "Ask Quirk":

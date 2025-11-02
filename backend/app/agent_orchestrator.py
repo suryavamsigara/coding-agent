@@ -36,7 +36,7 @@ class CodingAgent:
         ## Core Workflow & Constraints
         You MUST follow these rules precisely:
 
-        1.  **FIRST STEP:** Based on the user's task, your first starting action is to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure.
+        1.  **FIRST STEP:** Based on the user's task, your first valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure. You must call it to know the paths of files to call tools.
 
         2.  **ANALYZE:** Review the complete file structure from the `get_file_info` result and the user's request.
 
@@ -51,6 +51,8 @@ class CodingAgent:
         7.  **EFFICIENCY:** Never perform unnecessary or repetitive tool calls.
 
         8.  **COMPLETION:** When your plan is complete and you have the full answer or have finished the task, provide a final, comprehensive response to the user instead of calling another tool.
+
+        If the user's task is to create projects, you can create different files and folders to build and execute the plan.
 
         When you need to use a tool, provide a brief, single-line 'thought' (e.g., 'Okay, I'll read that file.') *before* you call the tool.
         
@@ -110,14 +112,12 @@ class CodingAgent:
             
             if chunk.parts:
                 buffered_parts.extend(chunk.parts)
-                print("\nInside: ", chunk.parts)
 
             if any(part.function_call for part in chunk.parts):
                 is_tool_call = True
             
             if not is_tool_call and chunk.text:
                 yield json.dumps({"final_answer_chunk": chunk.text}) + "\n"
-        print("\nAFTER\n", buffered_parts)
 
         if buffered_parts:
             self.contents.append(Content(role="model", parts=buffered_parts))

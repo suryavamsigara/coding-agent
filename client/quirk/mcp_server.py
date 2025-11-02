@@ -44,6 +44,30 @@ def get_file_info(directory: str = "."):
 
 
 @mcp.tool()
+def create_file(file_path: str):
+    """
+    Creates a new, empty file. Automatically creates needed parent folders.
+    """
+    base_dir: Path = get_working_directory()
+
+    if not base_dir.is_dir():
+        return f"Error: Working dir '{base_dir}' doesn't exist."
+    
+    target_path: Path = (base_dir / file_path).resolve()
+
+    if not target_path.is_relative_to(base_dir):
+        return f"Error: '{file_path}' is outside the working directory."
+    
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.touch()
+
+        return f"Successfully created empty file '{file_path}'"
+    except Exception as e:
+        return f"Error: Failed to create '{file_path}': {e}"
+    
+
+@mcp.tool()
 def create_directory(path: str):
     """Create a directory (including parents)."""
     base_dir: Path = get_working_directory()
@@ -100,7 +124,7 @@ def read_file(file_path: str, max_lines: int | None = None):
 @mcp.tool()
 def write_file(file_path: str, content: str):
     """
-    Create a new file or overwrite an existing file with the specified content inside the working directory. Automatically creates needed parent folders.
+    Create a new file and write or overwrite an existing file with the specified content inside the working directory. Automatically creates needed parent folders.
     """
     base_dir: Path = get_working_directory()
 
@@ -170,7 +194,7 @@ def delete_path(path: str):
     
     target_path: Path = (base_dir / path).resolve()
 
-    if not target_path.is_relative_to():
+    if not target_path.is_relative_to(base_dir):
         return f"Error: '{path}' is outside the working directory."
     
     if not target_path.exists():
