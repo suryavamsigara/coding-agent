@@ -10,7 +10,7 @@ load_dotenv()
 
 
 class CodingAgent:
-    def __init__(self, session_id: str, tools_list: Optional[list[dict[str, Any]]], model="gemini-2.0-flash-001"):
+    def __init__(self, session_id: str, tools_list: Optional[list[dict[str, Any]]], model="gemini-2.5-flash"):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("Gemini API key missing")
@@ -36,7 +36,7 @@ class CodingAgent:
         ## Core Workflow & Constraints
         You MUST follow these rules precisely:
 
-        1.  **FIRST STEP:** Based on the user's task, your first valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure. You must call it to know the paths of files to call tools.
+        1.  **FIRST STEP:** Based on the user's task, your first action might be to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure. You must call it to know the paths of files to call tools.
 
         2.  **ANALYZE:** Review the complete file structure from the `get_file_info` result and the user's request.
 
@@ -48,13 +48,13 @@ class CodingAgent:
 
         6.  **PATHING:** All file paths MUST be relative to the working directory (e.g., `src/main.py`).
 
-        7.  **EFFICIENCY:** Never perform unnecessary or repetitive tool calls.
+        7. **STATUS UPDATES:** Before each tool call, output a short summary describing what you're about to do.
 
-        8.  **COMPLETION:** When your plan is complete and you have the full answer or have finished the task, provide a final, comprehensive response to the user instead of calling another tool.
+        8.  **EFFICIENCY:** Never perform unnecessary or repetitive tool calls.
 
-        9. IBased on user's task, you can create different files and folders to build and execute the plan. You need to know the CONTEXT before starting, so READ RELEVANT files FIRST.
+        9.  **COMPLETION:** When your plan is complete and you have the full answer or have finished the task, provide a final, comprehensive response to the user instead of calling another tool.
 
-        When you need to use a tool, provide a brief, single-line 'thought' (e.g., 'Okay, I'll read that file.') *before* you call the tool.
+        10. Based on user's task, you can create different files and folders to build and execute the plan. You need to know the CONTEXT before starting, so READ RELEVANT files FIRST.
         
         Do not use Markdown (like `**` or `*`). All output must be plain text.
         """
@@ -88,9 +88,10 @@ class CodingAgent:
         config = GenerateContentConfig(
             tools=[self.gen_tools],
             system_instruction=self.system_prompt,
-            # thinking_config=types.ThinkingConfig(
-            #     thinking_budget=200
-            # )
+            thinking_config=types.ThinkingConfig(
+                thinking_budget=128,
+                include_thoughts=False
+            )
         )
 
         try:
@@ -111,13 +112,17 @@ class CodingAgent:
                 continue
             
             if chunk.parts:
-                buffered_parts.extend(chunk.parts)
+                for part in chunk.parts:
+                    buffered_parts.extend(chunk.parts)
+                    print("\nINSIDE\n ", part)
 
-            if any(part.function_call for part in chunk.parts):
-                is_tool_call = True
-            
-            if not is_tool_call and chunk.text:
-                yield json.dumps({"final_answer_chunk": chunk.text}) + "\n"
+                    if part.text:
+                        yield json.dumps({"final_answer_chunk": part.text}) + "\n"
+                    
+                    if part.function_call:
+                        is_tool_call = True
+        
+        print("\nOUTSIDE\n ", buffered_parts)
 
         if buffered_parts:
             self.contents.append(Content(role="model", parts=buffered_parts))
@@ -127,6 +132,7 @@ class CodingAgent:
             for part in buffered_parts:
                 if part.function_call:
                     function_call = part.function_call
+                    break
             
             if function_call:
                 yield json.dumps({
@@ -135,4 +141,5 @@ class CodingAgent:
                         "params": dict(function_call.args)
                     }
                 }) + "\n"
+        return
 

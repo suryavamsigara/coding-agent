@@ -147,18 +147,22 @@ class QuirkApp:
                             data = json.loads(line)
                             self.session_id = data.get("session_id") or self.session_id
 
-                            if data.get("tool_call"):
-                                if not thinking_task.done():
-                                    thinking_task.cancel()
-                                    await asyncio.wait([thinking_task], timeout=0.2)
-                                tool_result_payload = await self._handle_tool_call(data, mcp_session)
-                                break
-
                             if data.get("final_answer_chunk"):
                                 if not is_streaming_text:
                                     print_agent(" ", "text", end="")
                                     is_streaming_text = True
                                 print_agent(data["final_answer_chunk"], "text", end="")
+                                continue
+
+                            if data.get("tool_call"):
+                                if not thinking_task.done():
+                                    thinking_task.cancel()
+                                    await asyncio.wait([thinking_task], timeout=0.2)
+                                if is_streaming_text:
+                                    print()
+                                    is_streaming_text = False
+                                tool_result_payload = await self._handle_tool_call(data, mcp_session)
+                                break
                             
                             if data.get("final_answer"):
                                 if is_streaming_text:
@@ -382,11 +386,19 @@ def print_agent(msg: str, color: str = "", end: str="\n") -> None:
     else:
         msg_color = "\033[38;5;252m"
 
-    if end == "":
-        sys.stdout.write(f"{msg_color}{msg}{reset}")
-        sys.stdout.flush()
+    if end == "\n":
+        print(f"{prefix}{msg_color}{msg}{reset}", end=end)
+    
+    # 2. Handle streaming chunks (which have no newline)
     else:
-        print(f"{prefix} {msg_color}{msg}{reset}", end=end)
+        # This will be used for the *first* chunk to print the prefix
+        if msg == " ": 
+            sys.stdout.write(f"{prefix}{msg_color}{msg}{reset}")
+        # This will be used for all *subsequent* chunks
+        else:
+            sys.stdout.write(f"{msg_color}{msg}{reset}")
+        
+        sys.stdout.flush()
 
 
 def main():
