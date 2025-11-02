@@ -1,7 +1,6 @@
-
 import os
-import asyncio
-from typing import Optional, Any
+import json
+from typing import Optional, Any, Generator
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -37,7 +36,7 @@ class CodingAgent:
         ## Core Workflow & Constraints
         You MUST follow these rules precisely:
 
-        1.  **FIRST STEP:** Based on the user's task, your first valid starting action is to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure.
+        1.  **FIRST STEP:** Based on the user's task, your first starting action is to call `get_file_info` with `directory='.'` to list **all files recursively** if you need files structure.
 
         2.  **ANALYZE:** Review the complete file structure from the `get_file_info` result and the user's request.
 
@@ -52,26 +51,12 @@ class CodingAgent:
         7.  **EFFICIENCY:** Never perform unnecessary or repetitive tool calls.
 
         8.  **COMPLETION:** When your plan is complete and you have the full answer or have finished the task, provide a final, comprehensive response to the user instead of calling another tool.
+
+        When you need to use a tool, provide a brief, single-line 'thought' (e.g., 'Okay, I'll read that file.') *before* you call the tool.
+        
+        Do not use Markdown (like `**` or `*`). All output must be plain text.
         """
-
-    async def run(
-        self,
-        prompt: Optional[str] = None,
-        tool_result: Optional[dict[str, Any]] = None,
-    ):
-        if prompt:
-            self.contents.append(Content(role="user", parts=[Part(text=prompt)]))
-
-        if tool_result:
-            self.contents.append(Content(
-                role="tool",
-                parts=[Part.from_function_response(
-                    name=tool_result["tool_name"],
-                    response={"result": tool_result["response"]},
-                )]
-            ))
-
-        gen_tools = Tool(
+        self.gen_tools = Tool(
             function_declarations=[
                 FunctionDeclaration(
                     name=t["name"],
@@ -80,63 +65,74 @@ class CodingAgent:
                 ) for t in self.tools_list
             ]
         )
+    
+    def add_tool_response(self, tool_result: dict[str, Any]):
+        self.contents.append(Content(
+            role="tool",
+            parts=[Part.from_function_response(
+                name=tool_result["tool_name"],
+                response={"result": tool_result["response"]},
+            )]
+        ))
+
+    def run(
+        self,
+        prompt: Optional[str] = None,
+    ) -> Generator[str, None, None]:
+        
+        if prompt:
+            self.contents.append(Content(role="user", parts=[Part(text=prompt)]))
 
         config = GenerateContentConfig(
-            tools=[gen_tools],
+            tools=[self.gen_tools],
             system_instruction=self.system_prompt,
             # thinking_config=types.ThinkingConfig(
             #     thinking_budget=200
             # )
         )
 
-        def generate():
-            return self.client.models.generate_content(
+        try:
+            stream = self.client.models.generate_content_stream(
                 model=self.model,
                 contents=self.contents,
                 config=config,
             )
-
-        loop = asyncio.get_running_loop()
-        try:
-            response = await loop.run_in_executor(None, generate)
         except Exception as e:
-            return {"final_answer": f"LLM Error: {e}"}
+            yield json.dumps({"final_answer": f"LLM Error: {e}"}) + "\n"
+            return
 
-        if not response or not response.candidates:
-            return {"final_answer": "Empty response from LLM"}
+        buffered_parts = []
+        is_tool_call = False
 
-        candidate = response.candidates[0]
-        self.contents.append(candidate.content)
+        for chunk in stream:
+            if not chunk.candidates:
+                continue
+            
+            if chunk.parts:
+                buffered_parts.extend(chunk.parts)
+                print("\nInside: ", chunk.parts)
 
-        thought = None
-        function_call = None
+            if any(part.function_call for part in chunk.parts):
+                is_tool_call = True
+            
+            if not is_tool_call and chunk.text:
+                yield json.dumps({"final_answer_chunk": chunk.text}) + "\n"
+        print("\nAFTER\n", buffered_parts)
 
-        for part in candidate.content.parts:
-            if part.text:
-                thought = part.text
-            if part.function_call:
-                function_call = part.function_call
-        print(f"Thought\n{thought}\nFunction call\n{function_call}\n")
+        if buffered_parts:
+            self.contents.append(Content(role="model", parts=buffered_parts))
 
-        if function_call:
-            return {
-                "thought": thought,
-                "tool_call": {
-                    "tool_name": function_call.name,
-                    "params": dict(function_call.args)
-                }
-            }
-
-        # if response.function_calls:
-        #     fc = response.function_calls[0]
-        #     return {
-        #         "tool_call": {
-        #             "tool_name": fc.name,
-        #             "params": dict(fc.args)
-        #         }
-        #     }
-
-        # text = candidate.content.parts[0].text if candidate.content.parts else None
-        # return {"final_answer": text or "Empty answer"}
-        return {"final_answer": thought or "Empty answer"}
+        if is_tool_call:
+            function_call = None
+            for part in buffered_parts:
+                if part.function_call:
+                    function_call = part.function_call
+            
+            if function_call:
+                yield json.dumps({
+                    "tool_call": {
+                        "tool_name": function_call.name,
+                        "params": dict(function_call.args)
+                    }
+                }) + "\n"
 

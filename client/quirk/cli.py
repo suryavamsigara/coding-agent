@@ -4,6 +4,7 @@ import asyncio
 import subprocess
 import socket
 import httpx
+import json
 import argparse
 import importlib.metadata
 import random
@@ -70,114 +71,136 @@ class QuirkApp:
                 self.mcp_process.kill()
                 self.mcp_process.wait()
             print_agent("MCP server stopped", "gray")
-    
-    async def _safe_input(self, prompt: str):
-        """Lets us use input() without freezing the async event loop"""
-        return await asyncio.to_thread(input, prompt)
 
-    async def run_quirk(self, prompt: str, mcp_session: ClientSession):
+    async def _handle_tool_call(self, data: dict, mcp_session: ClientSession) -> dict:
         """
-        Runs the agent loop for a prompt.
-        It uses session_id for context
+        Handles tool call and showing loading spinner
+        Returns the tool_result_payload.
         """
+        call = data["tool_call"]
+        tool_name = call["tool_name"]
+        params = call.get("params", {})
+        action_msg = tool_actions.get(tool_name, tool_actions["_default"])
+        status_task = None
+        
+        if tool_name in {"write_file", "delete_path"}:
+            confirm = await questionary.confirm(
+                "Apply this change?", 
+                default=False, 
+                style=self.style
+            ).ask_async()
+            if not confirm:
+                print_agent("request denied", "yellow")
+                return {"tool_name": tool_name, "response": {"error": "User denied write request"}}
+                
+        try:
+            status_task = asyncio.create_task(self._show_tool_status(action_msg))
+            result = await mcp_session.call_tool(tool_name, params)
+            status_task.cancel()
+            await asyncio.wait([status_task], timeout=0.2)
+            
+            output = getattr(result, "content", None)
+            item = str(output)
+            if isinstance(output, list) and output:
+                item = output[0].text if hasattr(output[0], "text") else str(output[0])
+            
+            return {"tool_name": tool_name, "response": item}
+        
+        except Exception as e:
+            if status_task and not status_task.done():
+                status_task.cancel()
+                await asyncio.wait([status_task], timeout=0.2)
+            print_agent(f"Error {action_msg}\n{e}", "yellow")
+            return {"tool_name": tool_name, "response": {"error": str(e)}}
 
+    async def run_quirk(self, prompt: str, mcp_session: ClientSession, thinking_task: asyncio.Task):
         tool_result_payload = None
         cwd = os.getcwd()
-
         current_prompt = prompt
+        is_streaming_text = False
 
-        async with httpx.AsyncClient() as http_client:
-            for _ in range(MAX_ITERS):
-                payload = {
-                    "prompt": current_prompt,
-                    "cwd": cwd,
-                    "session_id": self.session_id,
-                    "tool_result": tool_result_payload,
-                }
+        for _ in range(MAX_ITERS):
+            payload = {
+                "prompt": current_prompt,
+                "cwd": cwd,
+                "session_id": self.session_id,
+                "tool_result": tool_result_payload,
+            }
 
-                try:
-                    resp = await http_client.post(CHAT_URL, json=payload, timeout=60)
-                    resp.raise_for_status()
-                    data = resp.json()
-                except Exception as e:
-                    print_agent(f"Error connecting to backend at: {e}", "yellow")
-                    return
+            current_prompt = None
+            tool_result_payload = None
+            is_streaming_text = False
                 
-                current_prompt = None
-                tool_result_payload = None
-                self.session_id = data.get("session_id")
-
-                if data.get("final_answer"):
-                    print_agent(data['final_answer'], "text")
-                    return
-
-                elif data.get("tool_call"):
-                    call = data["tool_call"]
-                    tool_name = call["tool_name"]
-                    params = call.get("params", {})
-                    action_msg = tool_actions.get(tool_name, tool_actions["_default"])
-                    
-                    if data.get("thought"):
-                        print_agent(data["thought"], "text")
-
-                    print_agent(action_msg, "quirk")
-
-                    if tool_name in {"write_file", "delete_path"}:
-                        confirm = (await self._safe_input("Apply this change? [y/N]: ")).strip().lower()
-                        if confirm != "y":
-                            print_agent("request denied", "yellow")
-                            tool_result_payload = {
-                                "tool_name": tool_name,
-                                "response": {"error": "User denied write request"}
-                            }
-                            continue
-
-                    status_task = None
+            try:
+                async with httpx.AsyncClient() as http_client:
+                    async with http_client.stream("POST", CHAT_URL, json=payload, timeout=None) as resp:
+                        resp.raise_for_status()
                         
-                    try:
-                        status_task = asyncio.create_task(self._show_tool_status(action_msg))
-                        result = await mcp_session.call_tool(tool_name, params)
-                        status_task.cancel()
-                        await asyncio.wait([status_task], timeout=0.2)
-                        output = getattr(result, "content", None)
-                        
-                        if isinstance(output, list) and output:
-                            item = output[0].text if hasattr(output[0], "text") else str(output[0])
-                        else:
-                            item = str(output)
+                        async for line in resp.aiter_lines():
+                            if not thinking_task.done():
+                                thinking_task.cancel()
+                                await asyncio.wait([thinking_task], timeout=0.2)
 
-                        tool_result_payload = {
-                            "tool_name": tool_name,
-                            "response": item
-                        }
-                    except Exception as e:
-                        if status_task and not status_task.done():
-                            status_task.cancel()
-                            await asyncio.wait([status_task], timeout=0.2)
-                        print_agent(f"Error {action_msg}\n{e}", "yellow")
-                        tool_result_payload = {
-                            "tool_name": tool_name,
-                            "response": {"error": str(e)}
-                        }
-                    continue
-                else:
-                    print_agent("No tool call or final response. Stopping..", "gray")
-                    return
+                            if not line.strip():
+                                continue
+
+                            data = json.loads(line)
+                            self.session_id = data.get("session_id") or self.session_id
+
+                            if data.get("tool_call"):
+                                if not thinking_task.done():
+                                    thinking_task.cancel()
+                                    await asyncio.wait([thinking_task], timeout=0.2)
+                                tool_result_payload = await self._handle_tool_call(data, mcp_session)
+                                break
+
+                            if data.get("final_answer_chunk"):
+                                if not is_streaming_text:
+                                    print_agent(" ", "text", end="")
+                                    is_streaming_text = True
+                                print_agent(data["final_answer_chunk"], "text", end="")
+                            
+                            if data.get("final_answer"):
+                                if is_streaming_text:
+                                    print()
+                                    is_streaming_text = False
+                                else:
+                                    print_agent(data['final_answer'], "text")
+                                return
+                
+            except Exception as e:
+                if not thinking_task.done():
+                    thinking_task.cancel()
+                    await asyncio.wait([thinking_task], timeout=0.2)
+                print_agent(f"Error connecting to backend at: {e}", "yellow")           
+                return
+
+            if tool_result_payload:
+                continue
             else:
-                print_agent(f"Maximum steps ({MAX_ITERS}) reached. Forcing final answer.", "yellow")
-                try:
-                    await http_client.post(
-                        BACKEND_URL,
-                        json={
-                            "prompt": "Maximum steps reached. Summarize progress and return final answer immediately.",
-                            "cwd": cwd,
-                            "session_id": self.session_id,
-                            "tool_result": None,
-                        },
-                        timeout=60
-                    )
-                except Exception as e:
-                    print_agent(f"Failed to send final prompt: {e}", "yellow")
+                if is_streaming_text:
+                    print()
+                return
+            
+        if thinking_task and not thinking_task.done():
+            thinking_task.cancel()
+            await asyncio.wait([thinking_task], timeout=0.2)
+              
+        else:
+            print_agent(f"Maximum steps ({MAX_ITERS}) reached. Forcing final answer.", "yellow")
+            try:
+                await http_client.post(
+                    BACKEND_URL,
+                    json={
+                        "prompt": "Maximum steps reached. Summarize progress and return final answer immediately.",
+                        "cwd": cwd,
+                        "session_id": self.session_id,
+                        "tool_result": None,
+                    },
+                    timeout=60
+                )
+            except Exception as e:
+                print_agent(f"Failed to send final prompt: {e}", "yellow")
                 
     async def _chat_loop(self):
         self.session_id = None
@@ -223,20 +246,24 @@ class QuirkApp:
                             print_agent("Exiting chat session..", "gray")
                             break
 
-                        await self._thinking_animation(glitch, duration=8)
-                        await self.run_quirk(question, mcp_session)
+                        thinking_task = asyncio.create_task(self._thinking_animation(glitch))
+
+                        await self.run_quirk(question, mcp_session, thinking_task)
         except Exception as e:
             print_agent(f"Could not connnect to MCP server: {e}", "yellow")
             print_agent("Chat session exited", "gray")
 
-    async def _thinking_animation(self, msgs, duration=10) -> None:
+    async def _thinking_animation(self, msgs) -> None:
         spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        for _ in range(duration):
-            msg = random.choice(msgs)
-            for s in spinner:
-                print(f"\r\033[38;5;39m{s}\033[0m {msg}...", end="", flush=True)
-                await asyncio.sleep(0.08)
-        print("\r" + " " * 40 + "\r", end="")
+        try:
+            while True:
+                msg = random.choice(msgs)
+                for s in spinner:
+                    print(f"\r\033[38;5;39m{s}\033[0m {msg}...", end="", flush=True)
+                    await asyncio.sleep(0.08)
+        except asyncio.CancelledError:
+            print("\r" + " " * 40 + "\r", end="")
+            raise
 
     async def _show_tool_status(self, action_message: str):
         spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -244,11 +271,11 @@ class QuirkApp:
         try:
             while True:
                 s = spinner[i % len(spinner)]
-                print(f"\r\033[38;5;39m{s}\033[0m {action_message}..", end="", flush=True)
+                print_agent(f"\r{s} {action_message}..", "quirk", end="")
                 await asyncio.sleep(0.08)
                 i += 1
         except asyncio.CancelledError:
-            print("\r" + " " * (len(action_message) + 10) + "\r", end="")
+            print()
             print_agent(f"✔ Done", "gray")
             raise
 
@@ -300,7 +327,6 @@ class QuirkApp:
 
             if action == "Exit":
                 print_agent("Goodbye!", "text")
-                print_agent("Keep building. Keep quirking.", "quirk")
                 break
 
             if action.endswith("Tools"):
@@ -328,7 +354,7 @@ quirk_style = Style(
     ]
 )
 
-glitch = ["Decoding", "Thinking", "Quirking", "Analyzing"]
+glitch = ["Decoding", "Working", "Thinking", "Quirking", "Analyzing"]
 
 def banner() -> None:
     title = "Quirk"
@@ -337,8 +363,8 @@ def banner() -> None:
     print(f"\033[1m\033[38;5;179m   {title}   \033[0m")
     print(f"\033[38;5;180m{line}\033[0m\n")
 
-def print_agent(msg: str, color: str = "") -> None:
-    prefix = "\033[38;5;240m│\033[0m"
+def print_agent(msg: str, color: str = "", end: str="\n") -> None:
+    prefix = "\033[38;5;240m│\033[0m "
     reset = "\033[0m"
 
     if color == "quirk":
@@ -351,11 +377,15 @@ def print_agent(msg: str, color: str = "") -> None:
     elif color == "gray":
         msg_color = "\033[38;5;244m"
     elif color == "text":
-        msg_color = "\033[38;5;15m"
+        msg_color = "\033[38;5;254m"
     else:
         msg_color = "\033[38;5;252m"
 
-    print(f"{prefix} {msg_color}{msg}{reset}")
+    if end == "":
+        sys.stdout.write(f"{msg_color}{msg}{reset}")
+        sys.stdout.flush()
+    else:
+        print(f"{prefix} {msg_color}{msg}{reset}", end=end)
 
 
 def main():
