@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shutil
+import shlex
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from quirk.config import get_working_directory
@@ -148,29 +149,28 @@ def write_file(file_path: str, content: str):
 @mcp.tool()
 def run_file(file_path: str, args = None):
     """Executes a Python file within the working directory."""
-    absolute_working_directory = get_working_directory()
-    working_directory = os.path.dirname(absolute_working_directory)
+    base_dir: Path = get_working_directory()
 
-    if not os.path.isdir(absolute_working_directory):
-        return f"Working directory '{working_directory}' does not exist."
+    if not base_dir.is_dir():
+        return f"Error: Working directory '{base_dir}' does not exist."
     
-    absolute_file_path = os.path.join(absolute_working_directory, file_path)
+    target_path: Path = (base_dir / file_path).resolve()
+
+    if not target_path.is_relative_to(base_dir):
+        return f"Error: '{file_path} is outside the working directory."
+    
+    if not target_path.is_file():
+        return f"Error: The file '{file_path}' is not a file or doesn't exist"
 
     if args is None:
         args = []
 
-    if not absolute_file_path.startswith(absolute_working_directory):
-        return f"Error: Access outside the working directory is denied."
-    
-    if not os.path.isfile(absolute_file_path):
-        return f"Error: The file '{file_path}' is not a file."
-
     try:
         result = subprocess.run(
-            ["python3", absolute_file_path] + args,
+            ["python3", str(target_path)] + args,
             capture_output=True,
             text=True,
-            cwd=absolute_working_directory,
+            cwd=base_dir,
             timeout=30
         )
         return {
@@ -263,6 +263,38 @@ def rename_path(old_path: str, new_path: str):
         return f"Renamed/moved '{old_path}' to '{new_path}'"
     except Exception as e:
         return f"Error: Rename/move failed: {e}"
+    
+@mcp.tool()
+def run_shell_command(command: str):
+    """
+    Execute a shell command within the working directory.
+    """
+    base_dir: Path = get_working_directory()
+
+    if "sudo" in command or "rm -rf /" in command:
+        return f"Error: Cannot execute this command."
+    
+    try:
+        args = shlex.split(command)
+
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            cwd=base_dir,
+            timeout=60
+        )
+
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "return_code": result.returncode
+        }
+    
+    except subprocess.TimeoutExpired:
+        return f"Error: Command timed out after 60 seconds."
+    except Exception as e:
+        return f"Error executing command: {e}"
 
 if __name__=="__main__":
     mcp.run(transport="streamable-http")

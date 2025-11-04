@@ -19,18 +19,6 @@ CHAT_URL = f"{BACKEND_URL}/chat"
 MCP_SERVER_URL = "http://127.0.0.1:9000/mcp"
 MAX_ITERS = 12 # will put this in backend later
 
-tool_actions = {
-    "get_file_info": "Scanning Files",
-    "read_file": "Reading File Contents",
-    "write_file": "Writing...",
-    "delete_path": "Deleting..",
-    "copy_file": "Copying File...",
-    "run_file": "Executing Script..",
-    "create_directory": "Creating folder",
-    "rename_path": "Renaming path..",
-    "_default": "Quirking"
-}
-
 def is_port_in_use(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('localhost', port)) == 0
@@ -147,11 +135,11 @@ class QuirkApp:
                             data = json.loads(line)
                             self.session_id = data.get("session_id") or self.session_id
 
-                            if data.get("final_answer_chunk"):
+                            if data.get("answer_chunk"):
                                 if not is_streaming_text:
                                     print_agent(" ", "text", end="")
                                     is_streaming_text = True
-                                print_agent(data["final_answer_chunk"], "text", end="")
+                                print_agent(data["answer_chunk"], "text", end="")
                                 continue
 
                             if data.get("tool_call"):
@@ -179,7 +167,6 @@ class QuirkApp:
                 print_agent(f"Error connecting to backend at: {e}", "yellow")           
                 return
             finally:
-                # Always ensure thinking task is cancelled
                 if thinking_task and not thinking_task.done():
                     thinking_task.cancel()
                     try:
@@ -246,12 +233,14 @@ class QuirkApp:
                     thinking_task = None
 
                     while True:
+                        print()
                         try:
                             question = await questionary.text(
                                 "You",
                                 style=quirk_style,
                                 instruction="",
                                 multiline=True,
+                                qmark="Q/>"
                             ).ask_async()
 
                             if not question:
@@ -330,6 +319,7 @@ class QuirkApp:
             style=quirk_style,
             pointer="➜ ",
             instruction="(↑/↓, Enter)",
+            qmark="$"
         ).ask_async()
     
     async def _choose_api(self) -> None:
@@ -341,12 +331,14 @@ class QuirkApp:
             ],
             style=quirk_style,
             instruction="(↑/↓, Enter)",
+            qmark="$"
         ).ask_async()
 
         if ans and "Yes" in ans:
             key = await questionary.password(
                 "Enter Gemini API key:",
                 style=quirk_style,
+                qmark="$"
             ).ask_async()
             if key:
                 # os.environ["GEMINI_API_KEY"] = key
@@ -380,6 +372,19 @@ class QuirkApp:
                 await self._chat_loop()
 
 
+tool_actions = {
+    "get_file_info": "Scanning Files",
+    "read_file": "Reading File Contents",
+    "write_file": "Writing.",
+    "delete_path": "Deleting..",
+    "copy_file": "Copying File..",
+    "run_file": "Executing Script..",
+    "create_directory": "Creating folder",
+    "rename_path": "Renaming path..",
+    "run_shell_command": "Running command",
+    "_default": "Quirking",
+}
+
 quirk_style = Style(
     [
         ("qmark",       "fg:#5fafff bold"),
@@ -405,12 +410,11 @@ def banner() -> None:
     print(f"\033[38;5;180m{line}\033[0m\n")
 
 def print_agent(msg: str, color: str = "", end: str="\n") -> None:
-    prefix = "\033[38;5;240m│\033[0m "
+    prefix = "" 
     reset = "\033[0m"
 
     if color == "quirk":
         msg_color = "\033[1m\033[38;5;153m"
-        msg = f"{msg}"
     elif color == "green":
         msg_color = "\033[38;5;140m"
     elif color == "yellow":
@@ -425,15 +429,8 @@ def print_agent(msg: str, color: str = "", end: str="\n") -> None:
     if end == "\n":
         print(f"{prefix}{msg_color}{msg}{reset}", end=end)
     
-    # 2. Handle streaming chunks (which have no newline)
     else:
-        # This will be used for the *first* chunk to print the prefix
-        if msg == " ": 
-            sys.stdout.write(f"{prefix}{msg_color}{msg}{reset}")
-        # This will be used for all *subsequent* chunks
-        else:
-            sys.stdout.write(f"{msg_color}{msg}{reset}")
-        
+        sys.stdout.write(f"{msg_color}{msg}{reset}")
         sys.stdout.flush()
 
 

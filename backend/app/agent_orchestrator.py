@@ -40,6 +40,8 @@ class CodingAgent:
 
         8. **NO MARKDOWN:** Plain text only. No `**bold**` or `*italic*`.
 
+        9. ALWAYS be friendly and ALWAYS ask relevant **follow up** questions.
+
         ## Available Actions
         - List/read/write/delete files
         - Create/rename/copy/move files and directories  
@@ -103,16 +105,13 @@ class CodingAgent:
             if chunk.parts:
                 for part in chunk.parts:
                     buffered_parts.extend(chunk.parts)
-                    print("\nINSIDE\n ", part)
 
                     if part.function_call:
                         is_tool_call = True
 
                     if part.text and not is_tool_call:
-                        yield json.dumps({"final_answer_chunk": part.text}) + "\n"
+                        yield json.dumps({"answer_chunk": part.text}) + "\n"
         
-        print("\nOUTSIDE\n ", buffered_parts)
-
         if buffered_parts:
             self.contents.append(Content(role="model", parts=buffered_parts))
 
