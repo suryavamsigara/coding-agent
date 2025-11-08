@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Any
 import uuid
-from agent_orchestrator import CodingAgent
+from .agent_orchestrator import CodingAgent
 
 app = FastAPI()
 
