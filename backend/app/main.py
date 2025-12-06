@@ -1,5 +1,4 @@
 import uvicorn
-import json
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -26,7 +25,6 @@ class ChatRequest(BaseModel):
 @app.post("/api/init-session")
 async def tools(request: InitRequest, db: Session=Depends(get_db)):
     session_id = str(uuid.uuid4())
-    print(f"Starting new session: {session_id}")
     
     try:
         chat_session = ChatSession(
@@ -42,7 +40,6 @@ async def tools(request: InitRequest, db: Session=Depends(get_db)):
         return {"session_id": session_id}
     except Exception as e:
         db.rollback()
-        print(f"Error initializing agent: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @app.post("/api/chat")
@@ -78,7 +75,6 @@ async def chat(request: ChatRequest, db: Session=Depends(get_db)):
                 db.commit()
             except Exception as e:
                 db.rollback()
-                print(f"Error saving session {request.session_id}: {e}")
 
     return StreamingResponse(
         stream_with_persist(), 
@@ -86,5 +82,4 @@ async def chat(request: ChatRequest, db: Session=Depends(get_db)):
     )
 
 if __name__ == "__main__":
-    print("Starting backend server on http://127.0.0.1:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

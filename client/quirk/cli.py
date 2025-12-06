@@ -246,7 +246,7 @@ class QuirkApp:
                                 style=quirk_style,
                                 instruction="",
                                 multiline=True,
-                                qmark="Q/>"
+                                qmark=">"
                             ).ask_async()
 
                             if not question:
@@ -327,38 +327,11 @@ class QuirkApp:
             instruction="(↑/↓, Enter)",
             qmark="$"
         ).ask_async()
-    
-    async def _choose_api(self) -> None:
-        ans = await questionary.select(
-            "Gemini model",
-            choices=[
-                "Yes - my own API key (can get a smarter model)",
-                "No - free version",
-            ],
-            style=quirk_style,
-            instruction="(↑/↓, Enter)",
-            qmark="$"
-        ).ask_async()
-
-        if ans and "Yes" in ans:
-            key = await questionary.password(
-                "Enter Gemini API key:",
-                style=quirk_style,
-                qmark="$"
-            ).ask_async()
-            if key:
-                # os.environ["GEMINI_API_KEY"] = key
-                print_agent("API key saved for this session.", "green")
-            else:
-                print_agent("No key entered – using free model.", "yellow")
-        else:
-            print_agent("Using free model.", "gray")
         
     async def run(self):
         self._ensure_mcp_process()
         time.sleep(0.8)
         banner()
-        await self._choose_api()
 
         while True:
             action = await self._main_menu()
