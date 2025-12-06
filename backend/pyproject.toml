@@ -1,0 +1,4 @@
+[dependency-groups]
+dev = [
+    "psycopg>=3.2.12",
+]

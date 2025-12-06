@@ -8,9 +8,62 @@ from google.genai.types import Tool, FunctionDeclaration, GenerateContentConfig,
 
 load_dotenv()
 
+def contents_from_json(contents_json: list[dict[str, Any]]) -> list[Content]:
+    result: list[Content] = []
+    
+    for item in contents_json:
+        role = item["role"]
+        parts = []
+        for p in item["parts"]:
+            if "text" in p:
+                parts.append(Part(text=p["text"]))
+            elif "function_call" in p:
+                parts.append(Part.from_function_call(
+                    name=p["function_call"]["name"],
+                    args=p["function_call"].get("args", {})
+                ))
+            elif "function_response" in p:
+                parts.append(Part.from_function_response(
+                    name=p["function_response"]["name"],
+                    response=p["function_response"]["response"],
+                ))
+        result.append(Content(role=role, parts=parts))
+    return result
+
+def contents_to_json(contents: list[Content]) -> list[dict[str, Any]]:
+    """Converts list[Content] into JSON for DB."""
+    out: list[dict[str, Any]] = []
+    
+    for c in contents:
+        parts_list = []
+        for p in c.parts:
+            if getattr(p, "text", None):
+                parts_list.append({"text": p.text})
+            elif getattr(p, "function_call", None):
+                parts_list.append({
+                    "function_call": {
+                        "name": p.function_call.name,
+                        "args": dict(p.function_call.args),
+                    }
+                })
+            elif getattr(p, "function_response", None):
+                parts_list.append({
+                    "function_response": {
+                        "name": p.function_response.name,
+                        "response": p.function_response.response,
+                    }
+                })
+        out.append({"role": c.role, "parts": parts_list})
+    return out
 
 class CodingAgent:
-    def __init__(self, session_id: str, tools_list: Optional[list[dict[str, Any]]], model="gemini-2.5-flash"):
+    def __init__(
+        self,
+        session_id: str,
+        tools_list: list[dict[str, Any]],
+        model="gemini-2.5-flash",
+        contents_json: Optional[list[dict[str, Any]]] = None,
+    ):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("Gemini API key missing")
@@ -19,7 +72,7 @@ class CodingAgent:
         self.model = model
         self.session_id = session_id
         self.tools_list = tools_list
-        self.contents = []
+        self.contents: list[Content] = contents_from_json(contents_json or [])
         self.system_prompt = """
         You are "Quirk", an autonomous AI coding agent that operates on the codebase in the working directory.
 
@@ -132,4 +185,7 @@ class CodingAgent:
                     }
                 }) + "\n"
         return
+    
+    def contents_as_json(self) -> list[dict[str, Any]]:
+        return contents_to_json(self.contents)
 
