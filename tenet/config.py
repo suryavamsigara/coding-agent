@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -12,3 +14,6 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+
+def get_working_directory() -> Path:
+    return Path.cwd()

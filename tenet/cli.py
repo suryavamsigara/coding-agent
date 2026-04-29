@@ -19,7 +19,8 @@ from .tui import (
 from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession
 
-BACKEND_URL = "http://127.0.0.1:8000/api"
+# BACKEND_URL = "http://127.0.0.1:8000/api"
+BACKEND_URL = "https://quirk-agent-backend.onrender.com/api"
 INIT_URL = f"{BACKEND_URL}/init-session"
 CHAT_URL = f"{BACKEND_URL}/chat"
 MCP_SERVER_URL = "http://127.0.0.1:9000/mcp"
