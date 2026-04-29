@@ -1,16 +1,11 @@
 import os
 import subprocess
 import shutil
-import shlex
 from pathlib import Path
-from mcp.server.fastmcp import FastMCP
-from quirk.config import get_working_directory
-
-mcp = FastMCP("Quirk Tools", host="127.0.0.1", port=9000)
+from tenet.config import get_working_directory
 
 EXCLUDE_DIRS = {"venv", ".venv", "env", "node_modules", ".git", "__pycache__", "package-lock.json"}
 
-@mcp.tool()
 def get_file_info(directory: str = "."):
     """
     Return recursive directory and file info relative to the working directory. (skips dev/system dirs).
@@ -43,8 +38,6 @@ def get_file_info(directory: str = "."):
 
     return {"directories": sorted(directories), "files": sorted(files)}
 
-
-@mcp.tool()
 def create_file(file_path: str):
     """
     Creates a new, empty file. Automatically creates needed parent folders.
@@ -67,8 +60,6 @@ def create_file(file_path: str):
     except Exception as e:
         return f"Error: Failed to create '{file_path}': {e}"
     
-
-@mcp.tool()
 def create_directory(path: str):
     """Create a directory (including parents)."""
     base_dir: Path = get_working_directory()
@@ -86,8 +77,6 @@ def create_directory(path: str):
     except Exception as e:
         return f"Error creating directory '{path}': {e}"
 
-
-@mcp.tool()
 def read_file(file_path: str, max_lines: int | None = None):
     """
     Reads the contents of a specified file. Can optionally read only the first N lines
@@ -121,8 +110,6 @@ def read_file(file_path: str, max_lines: int | None = None):
     except Exception as e:
         return f"Error reading file '{file_path}': {e}"
 
-
-@mcp.tool()
 def write_file(file_path: str, content: str):
     """
     Create a new file and write or overwrite an existing file with the specified content inside the working directory. Automatically creates needed parent folders.
@@ -145,8 +132,6 @@ def write_file(file_path: str, content: str):
     except Exception as e:
         return f"Failed to write to '{file_path}': {e}"
 
-
-@mcp.tool()
 def run_file(file_path: str, args = None):
     """Executes a Python file within the working directory."""
     base_dir: Path = get_working_directory()
@@ -181,8 +166,6 @@ def run_file(file_path: str, args = None):
     except Exception as e:
         return {"Error": e}
 
-
-@mcp.tool()
 def delete_path(path: str):
     """
     Delete a file or directory inside the working directory.
@@ -212,8 +195,6 @@ def delete_path(path: str):
     except Exception as e:
         return f"Error: Could not delete '{path}': {e}"
     
-
-@mcp.tool()
 def copy_file(source: str, destination: str):
     """Copy a file or directory inside the working directory."""
     base_dir: Path = get_working_directory()
@@ -239,7 +220,6 @@ def copy_file(source: str, destination: str):
     except Exception as e:
         return f"Error: Could not copy the file: {e}"
     
-@mcp.tool()
 def rename_path(old_path: str, new_path: str):
     """
     Rename or move a file/directory within working directory.
@@ -264,37 +244,3 @@ def rename_path(old_path: str, new_path: str):
     except Exception as e:
         return f"Error: Rename/move failed: {e}"
     
-@mcp.tool()
-def run_shell_command(command: str):
-    """
-    Execute a shell command within the working directory.
-    """
-    base_dir: Path = get_working_directory()
-
-    if "sudo" in command or "rm -rf /" in command:
-        return f"Error: Cannot execute this command."
-    
-    try:
-        args = shlex.split(command)
-
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            cwd=base_dir,
-            timeout=60
-        )
-
-        return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "return_code": result.returncode
-        }
-    
-    except subprocess.TimeoutExpired:
-        return f"Error: Command timed out after 60 seconds."
-    except Exception as e:
-        return f"Error executing command: {e}"
-
-if __name__=="__main__":
-    mcp.run(transport="streamable-http")
