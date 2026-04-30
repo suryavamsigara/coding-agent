@@ -5,7 +5,9 @@ TOOL_REGISTRY: dict[str, callable] = {
     "read_file": read_file,
     "write_file": write_file,
     "create_file": create_file,
+    "create_directory": create_directory,
     "copy_file": copy_file,
+    "rename_path": rename_path,
     "delete_path": delete_path
 }
 

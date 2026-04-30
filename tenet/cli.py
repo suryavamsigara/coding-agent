@@ -1,5 +1,5 @@
 import sys
-from tenet.client import client
+from tenet.llm.client import client
 from tenet.core.agent_orchestrator import CodingAgent
 
 def main():

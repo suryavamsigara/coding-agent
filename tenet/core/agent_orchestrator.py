@@ -1,9 +1,9 @@
 # my_agent/core/loop.py
 import json
 import logging
+from pathlib import Path
 from openai.types.chat import ChatCompletionMessage
 
-from tenet.client import client
 from tenet.tools.executor import execute_tool
 from tenet.tools.tool_schema import OPENAI_TOOLS_LIST
 from tenet.core.memory import MemoryManager
@@ -16,10 +16,10 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a highly capable CLI coding agent. 
-You can inspect directories, read, write, and execute code. 
-Always use the provided tools to verify the state of the filesystem before and after making changes.
-Work only in 'tests' directory."""
+base_path = Path(__file__).parent.parent
+prompt_path = base_path / "prompts" / "TENET.md"
+
+SYSTEM_PROMPT = prompt_path.read_text(encoding="utf-8").strip()
 
 class CodingAgent:
     def __init__(self, client, model="deepseek-chat", temperature=0.2):
