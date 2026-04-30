@@ -9,6 +9,8 @@ from tenet.tools.tool_schema import OPENAI_TOOLS_LIST
 from tenet.core.memory import MemoryManager
 
 logging.basicConfig(
+    filename="agent_debug.log",
+    filemode="a",
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
@@ -69,8 +71,6 @@ class CodingAgent:
 
         self.memory.add_user_message(user_prompt)
 
-        print("Thinking...")
-
         iteration = 0
         response_message = ""
 
@@ -92,8 +92,6 @@ class CodingAgent:
                     except json.JSONDecodeError:
                         tool_args = {}
                         print(f"⚠️ Warning: LLM provided invalid JSON for tool {tool_name}")
-
-                    print(f"🛠️  Executing: {tool_name}({', '.join(f'{k}={v}' for k, v in tool_args.items())})")
                     
                     observation = execute_tool(tool_name, **tool_args)
                     self.logger.debug(f"Tool output: {str(observation)[:200]}...")
@@ -108,9 +106,7 @@ class CodingAgent:
                 
             else:
                 self.logger.info(f"Agent finished after {iteration} iterations")
-                print(response_message.content)
                 return response_message.content
             
         error_msg = f"Agent exceeded maximum iterations ({max_iterations}) without final answer"
-        print(f"⚠️ {error_msg}")       
         return error_msg 
