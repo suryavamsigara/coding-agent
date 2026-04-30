@@ -1,7 +1,7 @@
 venv
 .env
 __pycache__
-testing_directory
-test.py
 uv.lock
 .venv
+
+tests

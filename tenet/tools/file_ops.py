@@ -1,5 +1,3 @@
-import os
-import subprocess
 import shutil
 from pathlib import Path
 from tenet.config import get_working_directory
