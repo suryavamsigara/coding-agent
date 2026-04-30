@@ -132,8 +132,9 @@ def write_file(file_path: str, content: str):
     except Exception as e:
         return f"Failed to write to '{file_path}': {e}"
 
+"""
 def run_file(file_path: str, args = None):
-    """Executes a Python file within the working directory."""
+    ""Executes a Python file within the working directory.""
     base_dir: Path = get_working_directory()
 
     if not base_dir.is_dir():
@@ -165,6 +166,7 @@ def run_file(file_path: str, args = None):
         }
     except Exception as e:
         return {"Error": e}
+"""
 
 def delete_path(path: str):
     """
