@@ -6,3 +6,5 @@ uv.lock
 
 tests
 agent_debug.log
+test.py
+project/
