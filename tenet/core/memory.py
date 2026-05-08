@@ -8,7 +8,7 @@ class MemoryManager:
         """
         self.system_prompt = system_prompt
         self.max_history_messages = max_history_messages
-        self.messages = list[dict[str, Any]]
+        self.messages: list[dict[str, Any]] = []
 
         self.clear()
 
@@ -33,7 +33,7 @@ class MemoryManager:
         self.messages.append(message_obj)
         self._enforce_context_limit()
     
-    def add_tool_observartion(self, tool_call_id: str, tool_name: str, content: str):
+    def add_tool_observation(self, tool_call_id: str, tool_name: str, content: str):
         """
         Adds the output of a tool execution. OpenAI requires tool_call_id.
         """
@@ -43,7 +43,6 @@ class MemoryManager:
             "name": tool_name,
             "content": content
         })
-
         self._enforce_context_limit()
     
     def _enforce_context_limit(self):
@@ -51,19 +50,21 @@ class MemoryManager:
         Prevents the context window frmo exceeding the token limit.
         If the history gets too long, we drop the oldest messages excluding the system prompt.
         """
-        if len(self.messages) > self.max_history_messages:
-            safe_index = 1
-            for i in range(2, len(self.messages)):
-                msg = self.messages[i]
+        if len(self.messages) - 1 <= self.max_history_messages:
+            return
+        
+        cut_index = None
+        for i in range(2, len(self.messages)):
+            msg = self.messages[i]
+            role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+            if role == "user":
+                cut_index = i
+                break
 
-                if isinstance(msg, dict):
-                    role = msg.get("role")
-                else:
-                    role = getattr(msg, "role", None)
-
-                if role == "user":
-                    safe_index = i
-                    break
-
-            self.messages = [self.messages[0]] + self.messages[safe_index:]
-            print(f"Memory trimmed. Dropped {safe_index - 1} old messages to save tokens.")
+        if cut_index is None:
+            return
+        
+        dropped = cut_index - 1
+        self.messages = [self.messages[0]] + self.messages[cut_index:]
+        print(f"[memory] Trimmed {dropped} old message(s) to stay within context limit.")
+        
