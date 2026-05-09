@@ -113,6 +113,39 @@ def replace_in_file(file_path: str, search_text: str, replace_text: str) -> Unio
     except Exception as e:
         return f"Error replacing text in '{file_path}': {e}"
 
+def patch_file_lines(file_path: str, start_line: int, end_line: int, new_content: str) -> dict | str:
+    """
+    Replaces exact line numbers with new content. No unified diff math required.
+    """
+    try:
+        target_path = _resolve_safe_path(file_path)
+        if not target_path.is_file():
+            return f"Error: '{file_path}' does not exist."
+
+        lines = target_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        
+        # 0-indexed math
+        start_idx = max(0, start_line - 1)
+        end_idx = min(len(lines), end_line)
+
+        # Ensure newline consistency
+        if new_content and not new_content.endswith("\n"):
+            new_content += "\n"
+            
+        new_lines = [new_content] if new_content else []
+        
+        # Slice out the old lines and drop in the new ones
+        updated_lines = lines[:start_idx] + new_lines + lines[end_idx:]
+        
+        target_path.write_text("".join(updated_lines), encoding="utf-8")
+        
+        return {
+            "path": file_path,
+            "changed": True,
+            "message": f"Replaced lines {start_line} to {end_line} successfully."
+        }
+    except Exception as e:
+        return f"Error patching lines in '{file_path}': {e}"
 
 def apply_patch(file_path: str, patch: str) -> str:
     """
@@ -436,7 +469,7 @@ def search_files(
         return {"error": f"Error searching files: {e}"}
 
 
-def find_symbol(symbol: str, file_glob: str = "**/*.py") -> dict:
+def find_symbol(symbol: str, file_glob: str = "**/*") -> dict:
     """
     Find where a function, class, or variable is defined or referenced.
     Wraps search_files with a pre-built definition pattern.
@@ -449,5 +482,5 @@ def find_symbol(symbol: str, file_glob: str = "**/*.py") -> dict:
 
     Returns grouped matches.
     """
-    pattern = rf"\b(def|class)\s+{re.escape(symbol)}\b|{re.escape(symbol)}\s*[=(:]"
+    pattern = rf"\b(def|class|function|const|let|var)\s+{re.escape(symbol)}\b|{re.escape(symbol)}\s*[=:\(]"
     return search_files(pattern=pattern, file_glob=file_glob, max_results=30, context_lines=1)

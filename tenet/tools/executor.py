@@ -1,14 +1,18 @@
+from __future__ import annotations
+
+from typing import Callable
+
 from tenet.tools.file_ops import *
 from tenet.tools.shell_ops import run_command
-from tenet.tools.context_ops import update_project_context
 
-TOOL_REGISTRY: dict[str, callable] = {
+_BASE_REGISTRY: dict[str, callable] = {
     "get_file_info":    get_file_info,
     "read_file":        read_file,
     "read_file_range":  read_file_range,
     "write_file":       write_file,
     "create_file":      create_file,
     "replace_in_file":  replace_in_file,
+    "patch_file_lines": patch_file_lines,
     "apply_patch":      apply_patch,
     "get_diff":         get_diff,
     "create_directory": create_directory,
@@ -20,17 +24,33 @@ TOOL_REGISTRY: dict[str, callable] = {
     "search_files":     search_files,
     "find_symbol":      find_symbol,
     "run_command":      run_command,
-    "update_project_context": update_project_context,
 }
 
-def execute_tool(tool_name: str, **args):
-    if tool_name not in TOOL_REGISTRY:
-        available = ", ".join(sorted(TOOL_REGISTRY.keys()))
-        return f"Error: Tool '{tool_name}' does not exist. Available tools: {available}"
-    
-    try:
-        return TOOL_REGISTRY[tool_name](**args)
-    except TypeError as e:
-        return f"Error: wrong arguments for tool '{tool_name}': {e}"
-    except Exception as e:
-        return f"Error executing '{tool_name}': {e}"
+class ToolExecutor:
+    """
+    Dispatches tool calls. One instance per CodingAgent.
+
+    The `context_updater` callable is bound to that agent's MemoryManager,
+    so there is no shared global state even when multiple agents coexist.
+    """
+
+    def __init__(self, context_updater: Callable) -> None:
+        self._registry: dict[str, Callable] = {
+            **_BASE_REGISTRY,
+            "update_project_context": context_updater,
+        }
+
+    @property
+    def tool_names(self) -> list[str]:
+        return sorted(self._registry.keys())
+
+    def execute(self, tool_name: str, **args):
+        if tool_name not in self._registry:
+            available = ", ".join(self.tool_names)
+            return f"Error: tool '{tool_name}' does not exist. Available: {available}"
+        try:
+            return self._registry[tool_name](**args)
+        except TypeError as exc:
+            return f"Error: wrong arguments for '{tool_name}': {exc}"
+        except Exception as exc:
+            return f"Error executing '{tool_name}': {exc}"
