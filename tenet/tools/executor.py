@@ -1,5 +1,6 @@
 from tenet.tools.file_ops import *
 from tenet.tools.shell_ops import run_command
+from tenet.tools.context_ops import update_project_context
 
 TOOL_REGISTRY: dict[str, callable] = {
     "get_file_info":    get_file_info,
@@ -19,6 +20,7 @@ TOOL_REGISTRY: dict[str, callable] = {
     "search_files":     search_files,
     "find_symbol":      find_symbol,
     "run_command":      run_command,
+    "update_project_context": update_project_context,
 }
 
 def execute_tool(tool_name: str, **args):

@@ -107,7 +107,7 @@ def handle_slash_command(cmd: str, agent: CodingAgent) -> bool:
 def main() -> None:
     print_welcome_banner()
 
-    agent = CodingAgent(client=client)
+    agent = CodingAgent(client=client, max_history_messages=60)
 
     session = PromptSession(
         history=FileHistory(HISTORY_FILE),
@@ -142,8 +142,7 @@ def main() -> None:
             # Tool call output is printed live inside run_agent_loop
             final_answer = agent.run_agent_loop(
                 user_prompt=user_input,
-                max_iterations=100,
-                stream_thoughts=True,
+                max_iterations=60,
             )
 
             console.print()

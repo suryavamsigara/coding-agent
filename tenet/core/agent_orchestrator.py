@@ -2,28 +2,32 @@ import json
 import logging
 from pathlib import Path
 from openai.types.chat import ChatCompletionMessage
-
+ 
 from tenet.tools.executor import execute_tool
+from tenet.tools.context_ops import bind_memory
 from tenet.tools.tool_schema import OPENAI_TOOLS_LIST
 from tenet.core.memory import MemoryManager
-
-logging.basicConfig(
-    filename="agent_debug.log",
-    filemode="a",
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+  
+_file_handler = logging.FileHandler("agent_debug.log", mode="a", encoding="utf-8")
+_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)-5s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+))
+ 
+log = logging.getLogger("tenet.agent")
+log.setLevel(logging.DEBUG)
+log.addHandler(_file_handler)
+log.propagate = False
 
 base_path = Path(__file__).parent.parent
 prompt_path = base_path / "prompts" / "TENET.md"
 SYSTEM_PROMPT = prompt_path.read_text(encoding="utf-8").strip()
 
-MAX_TOOL_OUTPUT_DISPLAY = 2000   # chars shown in terminal per tool result
-MAX_TOOL_OUTPUT_MEMORY = 20_000  # chars stored in context per tool result
-
-
+MAX_TOOL_OUTPUT_IN_CONTEXT = 12_000
+ 
+MAX_TOOL_OUTPUT_DISPLAY = 1_500
+ 
+ 
 class CodingAgent:
     def __init__(
         self,
@@ -35,143 +39,97 @@ class CodingAgent:
         self.client = client
         self.model = model
         self.temperature = temperature
+        self.max_history_messages = max_history_messages
         self.tools_list = OPENAI_TOOLS_LIST
-        self.logger = logging.getLogger(f"{__name__}.CodingAgent")
-
+ 
         self.memory = MemoryManager(
             system_prompt=SYSTEM_PROMPT,
             max_history_messages=max_history_messages,
         )
-
+        bind_memory(self.memory)
+  
     def reset_conversation(self) -> None:
-        """Clear all conversation history (keeps system prompt)."""
         self.memory.clear()
-        self.logger.info("Conversation memory reset.")
         print("[tenet] Conversation reset.")
-
-    def run_agent_loop(
-        self,
-        user_prompt: str,
-        max_iterations: int = 60,
-        stream_thoughts: bool = True,
-    ) -> str:
-        """
-        Core Reason-Act-Observe loop.
-
-        1. Send the conversation to the LLM.
-        2. If the LLM calls tools, execute them and feed results back.
-        3. Repeat until the LLM produces a plain text response (no tool calls).
-
-        Args:
-            user_prompt: The user's request.
-            max_iterations: Number of LLM -> tool -> observe cycles.
-            stream_thoughts: If True, print tool names + results to stdout in real-time.
-
-        Returns:
-            The agent's final text answer.
-        """
-        self.logger.info(f"Starting agent loop | prompt: {user_prompt[:120]}...")
+ 
+    def run_agent_loop(self, user_prompt: str, max_iterations: int = 50) -> str:
+        log.info(f"START prompt={user_prompt[:80]!r} max_iter={max_iterations} window_limit={self.max_history_messages}")
         self.memory.add_user_message(user_prompt)
-
+ 
         for iteration in range(1, max_iterations + 1):
-            self.logger.info(f"Iteration {iteration}/{max_iterations}")
-
-            response_message = self._get_agent_response()
-            self.memory.add_assistant_message(response_message)
-
-            if not response_message.tool_calls:
-                self.logger.info(f"Agent finished at iteration {iteration}")
-                return response_message.content or ""
-
-            for tool_call in response_message.tool_calls:
-                tool_name = tool_call.function.name
-
-                try:
-                    tool_args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    tool_args = {}
-                    print(f"  Warning: invalid JSON args for '{tool_name}', using empty dict")
-
-                if stream_thoughts:
-                    self._print_tool_call(tool_name, tool_args)
-
-                # Execute
-                observation = execute_tool(tool_name, **tool_args)
-
-                # Serialise for display + memory
-                if isinstance(observation, (dict, list)):
-                    raw_output = json.dumps(observation, indent=2, ensure_ascii=False)
-                else:
-                    raw_output = str(observation)
-
-                if stream_thoughts:
-                    self._print_tool_result(tool_name, raw_output)
-
-                # Truncate before storing to avoid ballooning the context
-                memory_output = raw_output[:MAX_TOOL_OUTPUT_MEMORY]
-                if len(raw_output) > MAX_TOOL_OUTPUT_MEMORY:
-                    memory_output += f"\n... [truncated — {len(raw_output)} chars total]"
-
-                self.memory.add_tool_observation(
-                    tool_call_id=tool_call.id,
-                    tool_name=tool_name,
-                    content=memory_output,
-                )
-
-                self.logger.info(
-                    f"Tool '{tool_name}' → {len(raw_output)} chars output | "
-                    f"history size: {len(self.memory.get_messages())}"
-                )
-
-        warn = f"[tenet] Reached max iterations ({max_iterations}). Requesting final summary..."
-        print(warn)
-        self.logger.warning(warn)
-
-        # Ask the model for a final answer with what it has
+            response = self._call_llm(iteration, max_iterations)
+            self.memory.add_assistant_message(response)
+ 
+            if not response.tool_calls:
+                log.info(f"DONE  iter={iteration} window={self.memory.window_size()}")
+                return response.content or ""
+ 
+            for tool_call in response.tool_calls:
+                self._execute_tool_call(tool_call)
+ 
+        log.warning(f"MAX_ITER reached ({max_iterations})")
         self.memory.add_user_message(
-            "You've used many tool calls. Please provide your best final answer now "
-            "based on everything you've learned so far."
+            "You've reached the iteration limit. Give your best final answer based on what you've done so far."
         )
-        final_response = self._get_agent_response()
-        return final_response.content or f"[Agent exceeded {max_iterations} iterations without completing.]"
-
-    # ---------------------------------------------------------
-    #  Internal helpers
-    # ---------------------------------------------------------
-
-    def _get_agent_response(self) -> ChatCompletionMessage:
-        """Send the current conversation to the LLM and return its message."""
-        current_history = self.memory.get_messages()
-        self.logger.debug(f"Sending {len(current_history)} messages to {self.model}")
+        response = self._call_llm(max_iterations + 1, max_iterations)
+        return response.content or f"[Reached {max_iterations} iterations without finishing.]"
+ 
+ 
+    def _call_llm(self, iteration: int, max_iterations: int) -> ChatCompletionMessage:
+        window = self.memory.window_size()
+        log.debug(f"iter={iteration}/{max_iterations} window={window} → calling LLM")
         try:
-            response = self.client.chat.completions.create(
+            resp = self.client.chat.completions.create(
                 model=self.model,
-                messages=current_history,
+                messages=self.memory.get_messages(),
                 tools=self.tools_list,
                 tool_choice="auto",
                 temperature=self.temperature,
             )
-            n_calls = len(response.choices[0].message.tool_calls or [])
-            self.logger.info(f"LLM response: {n_calls} tool call(s)")
-            return response.choices[0].message
+            n = len(resp.choices[0].message.tool_calls or [])
+            log.info(f"iter={iteration} window={window} tool_calls={n}")
+            return resp.choices[0].message
         except Exception as e:
-            self.logger.error(f"API error: {e}", exc_info=True)
+            log.error(f"LLM error: {e}", exc_info=True)
             raise
-
-    @staticmethod
-    def _print_tool_call(tool_name: str, args: dict) -> None:
-        """Pretty-print a tool invocation to stdout."""
-        args_preview = json.dumps(args, ensure_ascii=False)
-        if len(args_preview) > 300:
-            args_preview = args_preview[:300] + "..."
-        print(f"\n  🔧 {tool_name}({args_preview})")
-
-    @staticmethod
-    def _print_tool_result(tool_name: str, output: str) -> None:
-        """Pretty-print a tool result to stdout (truncated for readability)."""
-        preview = output[:MAX_TOOL_OUTPUT_DISPLAY]
-        if len(output) > MAX_TOOL_OUTPUT_DISPLAY:
-            preview += f"\n  ... [{len(output)} chars total]"
-        # Indent each line
-        indented = "\n".join("     " + line for line in preview.splitlines())
-        print(f"  ↳  {indented.lstrip()}")
+ 
+    def _execute_tool_call(self, tool_call) -> None:
+        tool_name = tool_call.function.name
+ 
+        try:
+            tool_args = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError:
+            tool_args = {}
+            print(f"  ⚠  Bad JSON args for {tool_name}")
+ 
+        # Print call
+        args_str = json.dumps(tool_args, ensure_ascii=False)
+        if len(args_str) > 200:
+            args_str = args_str[:200] + "…"
+        print(f"\n  🔧 {tool_name}  {args_str}")
+ 
+        # Execute
+        result = execute_tool(tool_name, **tool_args)
+ 
+        # Serialise
+        raw = json.dumps(result, indent=2, ensure_ascii=False) if isinstance(result, (dict, list)) else str(result)
+ 
+        # Display (truncated)
+        display = raw[:MAX_TOOL_OUTPUT_DISPLAY]
+        if len(raw) > MAX_TOOL_OUTPUT_DISPLAY:
+            display += f"\n  … [{len(raw):,} chars total]"
+        for line in display.splitlines():
+            print(f"     {line}")
+ 
+        # Store in context (truncated at a higher limit)
+        stored = raw[:MAX_TOOL_OUTPUT_IN_CONTEXT]
+        if len(raw) > MAX_TOOL_OUTPUT_IN_CONTEXT:
+            stored += f"\n[truncated — {len(raw):,} chars total]"
+ 
+        self.memory.add_tool_observation(
+            tool_call_id=tool_call.id,
+            tool_name=tool_name,
+            content=stored,
+        )
+ 
+        log.info(f"  tool={tool_name} output={len(raw):,}chars window={self.memory.window_size()}")

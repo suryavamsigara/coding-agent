@@ -372,4 +372,54 @@ OPENAI_TOOLS_LIST = [
             },
         },
     },
+
+    # ────────────────────────────────────────────
+    #  Memory
+    # ────────────────────────────────────────────
+
+    {
+        "type": "function",
+        "function": {
+            "name": "update_project_context",
+            "description": (
+                "Save what you have learned about this project into persistent memory that "
+                "survives context-window trims. Call this RIGHT AFTER reading any file — "
+                "not at the end. Once a file is recorded here you must NOT read_file it "
+                "again; use search_files to find exact locations before editing. "
+                "NEVER store line numbers — they go stale after edits."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_summaries": {
+                        "type": "object",
+                        "description": (
+                            "What each file owns. {path: one-line summary}. "
+                            "Example: {'project/app.js': 'state, renderPost(), createPost(), modal handlers'}"
+                        ),
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "symbols": {
+                        "type": "object",
+                        "description": (
+                            "Key functions/classes and which file they live in. "
+                            "NO line numbers — use search_files at edit time for exact location. "
+                            "Example: {'createPost': 'app.js — builds post obj, prepends to state.posts, calls renderFeed()'}"
+                        ),
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "facts": {
+                        "type": "object",
+                        "description": (
+                            "Stable facts: state shape, UI patterns, conventions. "
+                            "Example: {'state.posts': 'Array<{id,name,handle,time,text,imageData,likes,retweets,replies}>', "
+                            "'modal': '.hidden class on #postModal, cleared by closeModalBtn click'}"
+                        ),
+                        "additionalProperties": {"type": "string"},
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
