@@ -25,8 +25,9 @@ OPENAI_TOOLS_LIST = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read the full contents of a text file. "
-                "Use read_file_range instead when you only need part of a large file."
+                "AVOID USING ON LARGE EXISTING FILES. "
+                "Read the full contents of a text file. For existing files, you MUST use `search_files` "
+                "and `read_file_range` first to find what you need. Only use `read_file` if the file is very small."
             ),
             "parameters": {
                 "type": "object",
@@ -62,9 +63,10 @@ OPENAI_TOOLS_LIST = [
         "function": {
             "name": "write_file",
             "description": (
-                "Write (overwrite or create) a file with the given content. "
-                "Use for new files or when replacing the entire content. "
-                "Prefer replace_in_file or apply_patch for surgical edits."
+                "DANGER: OVERWRITES THE ENTIRE FILE."
+                "ONLY use this for creating brand new files. "
+                "NEVER use this to modify an existing file. If a file already exists, "
+                "you MUST use `replace_in_file` or `apply_patch` to edit it."
             ),
             "parameters": {
                 "type": "object",

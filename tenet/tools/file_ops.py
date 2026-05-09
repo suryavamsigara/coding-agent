@@ -76,6 +76,7 @@ def write_file(file_path: str, content: str) -> str:
     except Exception as e:
         return f"Error writing file '{file_path}': {e}"
 
+
 def create_file(file_path: str) -> str:
     """Create an empty file, making parent directories as needed."""
     try:
@@ -87,6 +88,11 @@ def create_file(file_path: str) -> str:
         return f"Error creating file '{file_path}': {e}"
 
 def replace_in_file(file_path: str, search_text: str, replace_text: str) -> Union[dict, str]:
+    """
+    Exact string replacement - replaces the FIRST occurrence only.
+    Use this for surgical edits. search_text must match the file exactly (including whitespace/indentation).
+    Returns an error if search_text is not found.
+    """
     try:
         target_path = _resolve_safe_path(file_path)
         if not target_path.is_file():
@@ -107,7 +113,23 @@ def replace_in_file(file_path: str, search_text: str, replace_text: str) -> Unio
     except Exception as e:
         return f"Error replacing text in '{file_path}': {e}"
 
+
 def apply_patch(file_path: str, patch: str) -> str:
+    """
+    Apply a unified diff patch to a file.
+
+    The patch should be a standard unified diff (as produced by `diff -u` or `git diff`).
+    Example format:
+        --- a/src/main.py
+        +++ b/src/main.py
+        @@ -10,6 +10,7 @@
+         existing line
+        -old line
+        +new line
+         existing line
+
+    Returns success message or detailed error.
+    """
     try:
         target_path = _resolve_safe_path(file_path)
         if not target_path.is_file():
@@ -131,7 +153,18 @@ def apply_patch(file_path: str, patch: str) -> str:
                 text=True,
             )
             if result.returncode != 0:
-                return f"Patch failed:\n{result.stderr.strip()}\n\nHint: ensure your diff uses unified format (diff -u)."
+                # Return current file content (first 120 lines) so the LLM can
+                # build a correct patch without an extra read_file round-trip.
+                current = target_path.read_text(encoding="utf-8")
+                preview_lines = current.splitlines()[:120]
+                preview = "\n".join(f"{i+1}: {l}" for i, l in enumerate(preview_lines))
+                truncated = " (truncated)" if len(current.splitlines()) > 120 else ""
+                return (
+                    f"PATCH_FAILED — hunk offsets did not match.\n"
+                    f"Error: {result.stderr.strip()}\n\n"
+                    f"Current file content{truncated} (use these exact lines to rebuild your patch):\n"
+                    f"{preview}"
+                )
 
             target_path.write_text(result.stdout, encoding="utf-8")
             return f"Patch applied successfully to '{file_path}'."
@@ -147,6 +180,7 @@ def apply_patch(file_path: str, patch: str) -> str:
 
 
 def _apply_patch_python(file_path: str, patch: str) -> str:
+    """Fallback Python-based unified diff applier when `patch` binary is unavailable."""
     try:
         target_path = _resolve_safe_path(file_path)
         original = target_path.read_text(encoding="utf-8")
@@ -197,6 +231,10 @@ def _apply_patch_python(file_path: str, patch: str) -> str:
 
 
 def get_diff(file_path: str, new_content: str) -> str:
+    """
+    Show a unified diff between the current file content and new_content.
+    Useful for previewing changes before writing.
+    """
     try:
         target_path = _resolve_safe_path(file_path)
         original = target_path.read_text(encoding="utf-8") if target_path.is_file() else ""
@@ -219,6 +257,7 @@ def create_directory(dir_path: str) -> str:
         return f"Directory '{dir_path}' created successfully."
     except Exception as e:
         return f"Error creating directory '{dir_path}': {e}"
+
 
 def list_files(glob_pattern: str = "**/*", max_results: int = 200) -> dict:
     """List files matching a glob pattern within the working directory."""
@@ -277,6 +316,7 @@ def copy_file(source_path: str, destination_path: str) -> str:
     except Exception as e:
         return f"Error copying file: {e}"
 
+
 def rename_path(old_path: str, new_path: str) -> str:
     try:
         src = _resolve_safe_path(old_path)
@@ -286,6 +326,7 @@ def rename_path(old_path: str, new_path: str) -> str:
         return f"Renamed '{old_path}' → '{new_path}'."
     except Exception as e:
         return f"Error renaming path: {e}"
+
 
 def delete_path(path: str) -> str:
     try:
