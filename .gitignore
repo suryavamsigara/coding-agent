@@ -7,5 +7,4 @@ uv.lock
 tests
 agent_debug.log
 .tenet_history
-debug_history/
 .tenet

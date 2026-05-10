@@ -13,18 +13,6 @@ from tenet.tools.executor import ToolExecutor
 from tenet.tools.tool_schema import OPENAI_TOOLS_LIST
 from tenet.ui.display import AgentDisplay
 
-# ── File logger (debug only) ─────────────────────────────────────────────────
-# Human-readable logs live in session_logger; this is for debug tracebacks only.
-
-_handler = logging.FileHandler("agent_debug.log", mode="a", encoding="utf-8")
-_handler.setFormatter(logging.Formatter(
-    "%(asctime)s %(levelname)-5s %(name)s | %(message)s", datefmt="%H:%M:%S",
-))
-log = logging.getLogger("tenet.agent")
-log.setLevel(logging.DEBUG)
-log.addHandler(_handler)
-log.propagate = False
-
 SYSTEM_PROMPT = (
     Path(__file__).parent.parent / "prompts" / "TENET.md"
 ).read_text(encoding="utf-8").strip()
@@ -162,10 +150,6 @@ class CodingAgent:
         )
 
     def run_agent_loop(self, user_prompt: str, max_iterations: int = 60) -> str:
-        log.info(
-            "START prompt=%r model=%s thinking=%s",
-            user_prompt[:80], self.model, self.thinking,
-        )
         self.logger.log_session_start(user_prompt, self.model, self.thinking)
 
         self.memory.strip_reasoning_content()
@@ -179,11 +163,9 @@ class CodingAgent:
 
             n_tools = len(msg.tool_calls or [])
             self.logger.log_llm_turn(iteration, self.memory.window_size(), n_tools)
-            log.info("iter=%d window=%d tool_calls=%d", iteration, self.memory.window_size(), n_tools)
 
             if not msg.tool_calls:
                 # Final turn - content is shown by show_final_answer in the CLI.
-                log.info("DONE iter=%d", iteration)
                 self.logger.log_session_end()
                 return msg.content or ""
 
@@ -198,7 +180,6 @@ class CodingAgent:
 
         # Iteration cap
         self.display.show_iteration_warning(max_iterations)
-        log.warning("MAX_ITER=%d reached", max_iterations)
         self.memory.strip_reasoning_content()
         self.memory.add_user_message(
             "You have reached the iteration limit. "
@@ -224,7 +205,6 @@ class CodingAgent:
 
             return acc.to_message()
         except Exception as exc:
-            log.error("LLM error: %s", exc, exc_info=True)
             self.logger.log_error("LLM call failed", exc)
             raise
 
@@ -269,4 +249,3 @@ class CodingAgent:
             tool_name=name,
             content=stored,
         )
-        log.debug("tool=%s stored=%d chars", name, len(stored))

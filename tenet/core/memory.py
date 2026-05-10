@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
-import json
 import re
 
 if TYPE_CHECKING:
@@ -116,10 +113,6 @@ class MemoryManager:
         self._context_injected = False
         self.messages: list[Any] = []
 
-        self.debug_dir = Path("debug_history")
-        self.debug_dir.mkdir(parents=True, exist_ok=True)
-        self._snapshot_id = 0
-
         self.clear()
 
     # Public API
@@ -129,7 +122,6 @@ class MemoryManager:
         self.messages = [{"role": "system", "content": self.system_prompt}]
         self._context_injected = False
         self._sync_context_slot()
-        self._dump_history_snapshot("clear")
 
     def get_messages(self) -> list[dict]:
         """Return serialised message list ready to POST to the API."""
@@ -139,12 +131,10 @@ class MemoryManager:
         self.messages.append({"role": "user", "content": content})
         # Trim only happens here - at a safe exchange boundary
         self._trim()
-        self._dump_history_snapshot("add_user")
 
     def add_assistant_message(self, msg: Any) -> None:
         """Store AssistantMessage (or raw SDK object) - reasoning_content intact."""
         self.messages.append(msg)
-        self._dump_history_snapshot("add_assistant")
 
     def add_tool_observation(self, tool_call_id: str, tool_name: str, content: str) -> None:
         self.messages.append({
@@ -153,7 +143,6 @@ class MemoryManager:
             "name": tool_name,
             "content": content,
         })
-        self._dump_history_snapshot(f"tool_{self._safe_name(tool_name)}")
 
     def strip_reasoning_content(self) -> None:
         """
@@ -168,18 +157,15 @@ class MemoryManager:
                     msg.reasoning_content = None
                 except AttributeError:
                     pass
-        self._dump_history_snapshot("strip_reasoning")
 
     def update_project_context(self, **updates) -> str:
         self.project.merge(updates)
         self._sync_context_slot()
-        self._dump_history_snapshot("project_context_update")
         return "Project context updated."
 
     def mark_file_read(self, path: str) -> None:
         self.project.mark_read(path)
         self._sync_context_slot()
-        self._dump_history_snapshot(f"mark_read_{self._safe_name(Path(path).name)}")
 
     def window_size(self) -> int:
         return len(self.messages) - self._conv_start()
@@ -210,24 +196,6 @@ class MemoryManager:
         text = text.strip().lower()
         text = re.sub(r"[^a-z0-9._-]+", "_", text)
         return text[:80] or "snapshot"
-
-    def _dump_history_snapshot(self, reason: str) -> None:
-        self._snapshot_id += 1
-        payload = {
-            "snapshot_id": self._snapshot_id,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-            "reason": reason,
-            "window_size": self.window_size(),
-            "messages": self.get_messages(),
-        }
-
-        safe_reason = self._safe_name(reason)
-        path = self.debug_dir / f"{self._snapshot_id:04d}_{safe_reason}.json"
-        latest = self.debug_dir / "latest.json"
-
-        text = json.dumps(payload, indent=2, ensure_ascii=False)
-        path.write_text(text, encoding="utf-8")
-        latest.write_text(text, encoding="utf-8")
 
     # Hard trim
 
@@ -260,6 +228,3 @@ class MemoryManager:
 
             del self.messages[cs:next_user]
             trimmed = True
-
-        if trimmed:
-            self._dump_history_snapshot("trim")
