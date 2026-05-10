@@ -4,43 +4,40 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
-
-from rich.console import Console
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.text import Text
+from typing import Any
 
 from tenet.core.memory import MemoryManager
+from tenet.core.session_logger import SessionLogger, get_log_directory
 from tenet.tools.context_ops import make_context_updater
 from tenet.tools.executor import ToolExecutor
 from tenet.tools.tool_schema import OPENAI_TOOLS_LIST
+from tenet.ui.display import AgentDisplay
 
+# ── File logger (debug only) ─────────────────────────────────────────────────
+# Human-readable logs live in session_logger; this is for debug tracebacks only.
 
 _handler = logging.FileHandler("agent_debug.log", mode="a", encoding="utf-8")
 _handler.setFormatter(logging.Formatter(
-    "%(asctime)s %(levelname)-5s %(name)s | %(message)s",
-    datefmt="%H:%M:%S",
+    "%(asctime)s %(levelname)-5s %(name)s | %(message)s", datefmt="%H:%M:%S",
 ))
 log = logging.getLogger("tenet.agent")
 log.setLevel(logging.DEBUG)
 log.addHandler(_handler)
 log.propagate = False
 
-base_path = Path(__file__).parent.parent
-prompt_path = base_path / "prompts" / "TENET.md"
-SYSTEM_PROMPT = prompt_path.read_text(encoding="utf-8").strip()
+SYSTEM_PROMPT = (
+    Path(__file__).parent.parent / "prompts" / "TENET.md"
+).read_text(encoding="utf-8").strip()
 
-MODEL_FLASH   = "deepseek-v4-flash"
-MODEL_PRO     = "deepseek-v4-pro"
+MODEL_FLASH = "deepseek-v4-flash"
+MODEL_PRO   = "deepseek-v4-pro"
 
-_MAX_DISPLAY = 1_500
-_MAX_STORED  = 12_000
+# Context window limits
 
-console = Console()
+_MAX_STORED = 12_000   # chars kept in context per tool result
 
 
-# Typed message containers (avoid raw SDK object dependencies)
+# Typed message containers
 
 @dataclass
 class ToolCallFunction:
@@ -70,14 +67,11 @@ class _StreamAccumulator:
     def __init__(self) -> None:
         self._content: list[str] = []
         self._reasoning: list[str] = []
-        self._tool_calls: dict[int, dict[str, str]] = {}
+        self._tcs: dict[int, dict[str, str]] = {}
         self.finish_reason: str | None = None
 
-    def consume(self, chunk) -> str | None:
-        """
-        Process one chunk. Returns text delta if any (for live display),
-        None otherwise.
-        """
+    def consume(self, chunk: Any) -> str | None:
+        """Process one chunk. Returns text delta if any, None otherwise."""
         choice = chunk.choices[0] if chunk.choices else None
         if not choice:
             return None
@@ -98,32 +92,30 @@ class _StreamAccumulator:
             self._content.append(text)
             return text
 
-        # tool call chunks
-        for tc_chunk in delta.tool_calls or []:
-            idx = tc_chunk.index
-            if idx not in self._tool_calls:
-                self._tool_calls[idx] = {"id": "", "name": "", "args": ""}
-            buf = self._tool_calls[idx]
-            buf["id"] = buf["id"] or (tc_chunk.id or "")
-            if tc_chunk.function:
-                buf["name"] += tc_chunk.function.name or ""
-                buf["args"] += tc_chunk.function.arguments or ""
-
+        for tc in delta.tool_calls or []:
+            buf = self._tcs.setdefault(tc.index, {"id": "", "name": "", "args": ""})
+            buf["id"] = buf["id"] or (tc.id or "")
+            if tc.function:
+                buf["name"] += tc.function.name or ""
+                buf["args"]  += tc.function.arguments or ""
         return None
 
     def to_message(self) -> AssistantMessage:
-        tool_calls = None
-        if self._tool_calls:
-            tool_calls = [
+        tcs = None
+        if self._tcs:
+            tcs = [
                 ToolCall(
-                    id=buf["id"],
-                    function=ToolCallFunction(name=buf["name"], arguments=buf["args"]),
+                    id=self._tcs[i]["id"],
+                    function=ToolCallFunction(
+                        name=self._tcs[i]["name"],
+                        arguments=self._tcs[i]["args"],
+                    ),
                 )
-                for buf in (self._tool_calls[i] for i in sorted(self._tool_calls))
+                for i in sorted(self._tcs)
             ]
         return AssistantMessage(
             content="".join(self._content) or None,
-            tool_calls=tool_calls,
+            tool_calls=tcs,
             reasoning_content="".join(self._reasoning) or None,
         )
 
@@ -132,11 +124,12 @@ class _StreamAccumulator:
 class CodingAgent:
     def __init__(
         self,
-        client,
+        client: Any,
         model: str = MODEL_FLASH,
         thinking: bool = False,
         max_history_messages: int = 60,
         tools: list | None = None,
+        log_dir=None,
     ) -> None:
         self.client = client
         self.model = model
@@ -147,79 +140,100 @@ class CodingAgent:
             system_prompt=SYSTEM_PROMPT,
             max_history_messages=max_history_messages,
         )
+        self.display = AgentDisplay()
+        self.logger = SessionLogger(log_dir=log_dir or get_log_directory())
 
-        # Wire update_project_context to this agent's memory
-        updater = make_context_updater(self.memory)
-        self.executor = ToolExecutor(context_updater=updater)
+        context_updater = make_context_updater(self.memory)
+        self.executor = ToolExecutor(
+            context_updater=context_updater,
+            file_read_tracker=self.memory.mark_file_read,
+            display=self.display,
+            logger=self.logger,
+            # Live reference into memory - stays current as files are read/written
+            known_files=self.memory.project.read_files,
+        )
+
+    # Public
 
     def reset_conversation(self) -> None:
         self.memory.clear()
-        console.print("[bold green]✓[/bold green] Conversation reset. Project context preserved.")
+        self.display.con.print(
+            "[bold green]✓[/bold green] Conversation reset. Project context preserved."
+        )
 
     def run_agent_loop(self, user_prompt: str, max_iterations: int = 60) -> str:
         log.info(
             "START prompt=%r model=%s thinking=%s",
             user_prompt[:80], self.model, self.thinking,
         )
+        self.logger.log_session_start(user_prompt, self.model, self.thinking)
 
         self.memory.strip_reasoning_content()
         self.memory.add_user_message(user_prompt)
 
+        total_tool_calls = 0
+
         for iteration in range(1, max_iterations + 1):
-            msg = self._stream_llm(iteration, max_iterations)
+            msg = self._stream_turn(iteration, max_iterations)
             self.memory.add_assistant_message(msg)
 
+            n_tools = len(msg.tool_calls or [])
+            self.logger.log_llm_turn(iteration, self.memory.window_size(), n_tools)
+            log.info("iter=%d window=%d tool_calls=%d", iteration, self.memory.window_size(), n_tools)
+
             if not msg.tool_calls:
-                log.info("DONE iter=%d window=%d", iteration, self.memory.window_size())
+                # Final turn - content is shown by show_final_answer in the CLI.
+                log.info("DONE iter=%d", iteration)
+                self.logger.log_session_end()
                 return msg.content or ""
 
+            # Persist any narration the model emitted alongside its tool calls.
+            # Without this the commentary disappears when the Live panel closes.
+            if msg.content and msg.content.strip():
+                self.display.show_narration(msg.content)
+
             for tool_call in msg.tool_calls:
-                self._run_tool(tool_call)
+                self._dispatch_tool(tool_call)
+                total_tool_calls += 1
 
         # Iteration cap
+        self.display.show_iteration_warning(max_iterations)
         log.warning("MAX_ITER=%d reached", max_iterations)
         self.memory.strip_reasoning_content()
         self.memory.add_user_message(
             "You have reached the iteration limit. "
             "Summarise what was completed and what still needs to be done."
         )
-        final = self._stream_llm(max_iterations + 1, max_iterations)
+        final = self._stream_turn(max_iterations + 1, max_iterations)
+        self.logger.log_session_end()
         return final.content or f"[Stopped after {max_iterations} iterations.]"
 
+    # Streaming LLM turn
 
-    def _stream_llm(self, iteration: int, max_iterations: int) -> AssistantMessage:
-        window = self.memory.window_size()
-        log.debug("iter=%d/%d window=%d", iteration, max_iterations, window)
-
-        kwargs = self._build_kwargs(stream=True)
-
+    def _stream_turn(self, iteration: int, max_iter: int) -> AssistantMessage:
+        kwargs = self._build_api_kwargs()
         try:
             stream = self.client.chat.completions.create(**kwargs)
             acc = _StreamAccumulator()
-            buf: list[str] = []
 
-            with Live(console=console, refresh_per_second=15) as live:
+            with self.display.streaming_panel() as buf:
                 for chunk in stream:
                     delta = acc.consume(chunk)
                     if delta:
                         buf.append(delta)
-                        live.update(Markdown("".join(buf)))
 
-            msg = acc.to_message()
-            n_tools = len(msg.tool_calls or [])
-            log.info("iter=%d window=%d tool_calls=%d", iteration, window, n_tools)
-            return msg
-
+            return acc.to_message()
         except Exception as exc:
             log.error("LLM error: %s", exc, exc_info=True)
+            self.logger.log_error("LLM call failed", exc)
             raise
 
-    def _build_kwargs(self, stream: bool = False) -> dict:
+    def _build_api_kwargs(self) -> dict:
         kwargs: dict = dict(
             model=self.model,
             messages=self.memory.get_messages(),
             tools=self._tools,
-            stream=stream,
+            stream=True,
         )
         if self.thinking:
             kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
@@ -228,36 +242,24 @@ class CodingAgent:
             kwargs["tool_choice"] = "auto"
         return kwargs
 
-    # Tool execution
+    # Tool dispatch
 
-    def _run_tool(self, tool_call: ToolCall) -> None:
+    def _dispatch_tool(self, tool_call: ToolCall) -> None:
         name = tool_call.function.name
-
         try:
             args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError:
             args = {}
-            console.print(f"  [bold yellow]Error[/bold yellow]  invalid JSON args for [cyan]{name}[/cyan]")
+            self.display.show_error(f"Invalid JSON args for tool '{name}'")
 
-        preview = json.dumps(args, ensure_ascii=False)
-        if len(preview) > 200:
-            preview = preview[:200] + "…"
-        console.print(f"\n  [bold cyan]🔧 {name}[/bold cyan]  [dim]{preview}[/dim]")
+        raw_result = self.executor.execute(name, **args)
 
-        result = self.executor.execute(name, **args)
-
+        # Truncate what goes into context to protect the window
         raw = (
-            json.dumps(result, indent=2, ensure_ascii=False)
-            if isinstance(result, (dict, list))
-            else str(result)
+            json.dumps(raw_result, indent=2, ensure_ascii=False)
+            if isinstance(raw_result, (dict, list))
+            else str(raw_result)
         )
-
-        display = raw[:_MAX_DISPLAY]
-        if len(raw) > _MAX_DISPLAY:
-            display += f"\n  … [{len(raw):,} chars total]"
-        for line in display.splitlines():
-            console.print(f"     [dim]{line}[/dim]")
-
         stored = raw[:_MAX_STORED]
         if len(raw) > _MAX_STORED:
             stored += f"\n[truncated — {len(raw):,} chars total]"
@@ -267,5 +269,4 @@ class CodingAgent:
             tool_name=name,
             content=stored,
         )
-        log.info("  tool=%s out=%d chars window=%d", name, len(raw), self.memory.window_size())
-        
+        log.debug("tool=%s stored=%d chars", name, len(stored))

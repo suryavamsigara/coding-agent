@@ -14,8 +14,7 @@ if TYPE_CHECKING:
 
 class ProjectContext:
     """
-    Structured summary of what the agent knows about the project.
-    Pinned as messages[1] so it survives every context-window trim.
+    Persistent knowledge about the project. Rendered as a pinned system message.
     """
     def __init__(self) -> None:
         self.file_summaries: dict[str, str] = {}
@@ -123,6 +122,8 @@ class MemoryManager:
 
         self.clear()
 
+    # Public API
+
     def clear(self) -> None:
         """Reset conversation. Project context (knowledge) survives."""
         self.messages = [{"role": "system", "content": self.system_prompt}]
@@ -136,6 +137,7 @@ class MemoryManager:
 
     def add_user_message(self, content: str) -> None:
         self.messages.append({"role": "user", "content": content})
+        # Trim only happens here - at a safe exchange boundary
         self._trim()
         self._dump_history_snapshot("add_user")
 

@@ -6,8 +6,6 @@ uv.lock
 
 tests
 agent_debug.log
-test.py
-project/
-search.py
 .tenet_history
 debug_history/
+.tenet

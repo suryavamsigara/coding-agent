@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import logging
 
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
@@ -17,12 +16,12 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
 from tenet.llm.client import client
 from tenet.core.agent_orchestrator import CodingAgent, MODEL_FLASH, MODEL_PRO
-
-console = Console()
+from tenet.ui.display import AgentDisplay, console
 
 PROMPT_STYLE = Style.from_dict({"prompt": "ansicyan bold"})
 HISTORY_FILE = ".tenet_history"
 
+# alias → (model_name, thinking_enabled)
 MODEL_ALIASES: dict[str, tuple[str, bool]] = {
     "flash":   (MODEL_FLASH, False),
     "flash-t": (MODEL_FLASH, True),
@@ -44,10 +43,36 @@ HELP_TEXT = """
 | /context        | Show current project context                         |
 | /tree           | Show project directory tree                          |
 | /ls             | List all project files                               |
-| /tools          | List available tools                                 |
+| /tools          | List available tools with categories                 |
+| /log            | Show path to current session log                     |
 | /help           | Show this help                                       |
 | exit / quit     | Quit Tenet                                           |
 """
+
+_TOOL_CATEGORIES = {
+    "begin_phase":            "phase",
+    "submit_plan":            "phase",
+    "request_confirmation":   "phase",
+    "search_files":           "search",
+    "find_symbol":            "search",
+    "get_file_info":          "metadata",
+    "read_file":              "read",
+    "read_file_range":        "read",
+    "write_file":             "write",
+    "create_file":            "write",
+    "replace_in_file":        "edit",
+    "patch_file_lines":       "edit",
+    "apply_patch":            "edit",
+    "get_diff":               "edit",
+    "create_directory":       "directory",
+    "list_files":             "directory",
+    "directory_tree":         "directory",
+    "copy_file":              "files",
+    "rename_path":            "files",
+    "delete_path":            "files",
+    "run_command":            "shell",
+    "update_project_context": "memory",
+}
 
 
 def _model_label(model: str, thinking: bool) -> str:
@@ -61,8 +86,11 @@ def print_welcome_banner(agent: CodingAgent) -> None:
     t.append(f"model: {agent.model}", style="dim white")
     if agent.thinking:
         t.append("  [thinking]", style="dim yellow")
-    t.append("  •  /model flash|pro[-t]  •  exit to quit", style="dim white")
+    t.append("  •  /model flash|pro[-t]  •  /help  •  exit", style="dim white")
     console.print(Panel(t, border_style="cyan", padding=(0, 2)))
+    console.print(
+        f"  [dim]Session log: {agent.logger.session_id}[/dim]\n"
+    )
 
 
 def handle_slash_command(cmd: str, agent: CodingAgent) -> bool:
@@ -80,10 +108,12 @@ def handle_slash_command(cmd: str, agent: CodingAgent) -> bool:
             key = parts[1].lower()
             if key in MODEL_ALIASES:
                 agent.model, agent.thinking = MODEL_ALIASES[key]
-                console.print(f"[green]✓[/green] Switched to {_model_label(agent.model, agent.thinking)}")
+                console.print(
+                    f"[green]✓[/green] Switched to {_model_label(agent.model, agent.thinking)}"
+                )
             else:
                 opts = ", ".join(MODEL_ALIASES)
-                console.print(f"[red]Unknown model alias '{parts[1]}'. Options: {opts}[/red]")
+                console.print(f"[red]Unknown alias '{parts[1]}'. Options: {opts}[/red]")
         return True
 
     if base == "/context":
@@ -112,38 +142,25 @@ def handle_slash_command(cmd: str, agent: CodingAgent) -> bool:
         table = Table(title="Available Tools", box=box.SIMPLE, border_style="cyan")
         table.add_column("Tool", style="bold cyan", no_wrap=True)
         table.add_column("Category", style="dim")
-        categories = {
-            "get_file_info":          "metadata",
-            "read_file":              "read",
-            "read_file_range":        "read",
-            "write_file":             "write",
-            "create_file":            "write",
-            "replace_in_file":        "edit",
-            "patch_file_lines":       "edit",
-            "apply_patch":            "edit",
-            "get_diff":               "edit",
-            "create_directory":       "directory",
-            "list_files":             "directory",
-            "directory_tree":         "directory",
-            "copy_file":              "files",
-            "rename_path":            "files",
-            "delete_path":            "files",
-            "search_files":           "search",
-            "find_symbol":            "search",
-            "run_command":            "shell",
-            "update_project_context": "memory",
-        }
         for name in agent.executor.tool_names:
-            table.add_row(name, categories.get(name, ""))
+            table.add_row(name, _TOOL_CATEGORIES.get(name, ""))
         console.print(table)
+        return True
+
+    if base == "/log":
+        from tenet.core.session_logger import get_log_directory
+        log_dir = get_log_directory()
+        sid = agent.logger.session_id
+        console.print(f"Session ID:  [bold cyan]{sid}[/bold cyan]")
+        console.print(f"JSONL log:   [dim]{log_dir / f'{sid}.jsonl'}[/dim]")
+        console.print(f"Text log:    [dim]{log_dir / f'{sid}.log'}[/dim]")
         return True
 
     if base in ("/help", "/?"):
         console.print(Markdown(HELP_TEXT))
         return True
 
-    # Unknown command - show a hint but don't abort
-    console.print(f"[yellow]Unknown command '{base}'. Type /help for a list of commands.[/yellow]")
+    console.print(f"[yellow]Unknown command '{base}'. Type /help for the list.[/yellow]")
     return True
 
 
@@ -171,29 +188,26 @@ def main() -> None:
 
         if user_input.lower() in ("exit", "quit"):
             console.print("\n[bold red]Shutting down Tenet. Goodbye![/bold red]")
+            agent.logger.log_session_end()
             break
 
         if user_input.startswith("/"):
             handle_slash_command(user_input, agent)
             continue
 
+        agent.logger.log_user_message(user_input)
         console.print()
+
         try:
             answer = agent.run_agent_loop(user_prompt=user_input)
-            console.print()
-            if answer:
-                label = f"[bold green]Tenet[/bold green]  [dim]{agent.model}"
-                if agent.thinking:
-                    label += "  thinking"
-                label += "[/dim]"
-                console.print(Panel(Markdown(answer), title=label, border_style="green", padding=(1, 2)))
-            else:
-                console.print("[dim](no response)[/dim]")
+            agent.display.show_final_answer(answer, agent.model, agent.thinking)
         except KeyboardInterrupt:
-            console.print("\n[bold yellow]⚠  Task interrupted.[/bold yellow]")
+            agent.display.show_interrupted()
+            agent.logger.log_error("Task interrupted by user")
         except Exception as exc:
-            console.print(f"\n[bold red]Error:[/bold red] {exc}")
-            logging.getLogger(__name__).exception("Unhandled error in agent loop")
+            agent.display.show_error(str(exc))
+            agent.logger.log_error("Unhandled error in agent loop", exc)
+            logging.getLogger(__name__).exception("Unhandled error")
 
 
 if __name__ == "__main__":

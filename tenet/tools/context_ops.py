@@ -7,9 +7,7 @@ if TYPE_CHECKING:
 
 
 def make_context_updater(memory: "MemoryManager") -> Callable:
-    """
-    Return a callable that the ToolExecutor will register as 'update_project_context'.
-    """
+    """Return a per-agent update_project_context callable."""
 
     def update_project_context(
         file_summaries: dict[str, str] | None = None,
@@ -24,12 +22,12 @@ def make_context_updater(memory: "MemoryManager") -> Callable:
             symbols:        {name: "file - what the symbol does, its role"}
             facts:          {key: "stable fact about state, conventions, patterns"}
         """
-        updates = {}
-        if file_summaries is not None:
+        updates: dict = {}
+        if file_summaries:
             updates["file_summaries"] = file_summaries
-        if symbols is not None:
+        if symbols:
             updates["symbols"] = symbols
-        if facts is not None:
+        if facts:
             updates["facts"] = facts
         return memory.update_project_context(**updates)
 
