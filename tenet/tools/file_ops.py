@@ -10,8 +10,8 @@ from typing import Union
 
 from tenet.config import get_working_directory
 
-EXCLUDE_DIRS = {"venv", ".venv", "env", "node_modules", ".git", "__pycache__", "dist", "build", ".mypy_cache", ".pytest_cache"}
-EXCLUDE_FILES = {"package-lock.json", "yarn.lock", "poetry.lock", ".DS_Store"}
+EXCLUDE_DIRS = {"venv", ".venv", "env", "node_modules", ".git", "__pycache__", "dist", "build", ".mypy_cache", ".pytest_cache", ".tenet"}
+EXCLUDE_FILES = {"package-lock.json", "yarn.lock", "poetry.lock", ".DS_Store", ".tenet_history"}
 
 def _resolve_safe_path(file_path: str) -> Path:
     base_dir: Path = get_working_directory().resolve()

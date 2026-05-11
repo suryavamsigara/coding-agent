@@ -164,12 +164,7 @@ def handle_slash_command(cmd: str, agent: CodingAgent) -> bool:
     return True
 
 
-def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] in ("--version", "-version", "-v", "--v", "-V", "--V"):
-        from importlib.metadata import version
-        print(f"Tenet {version('tenet')}")
-        return
-
+def start_tenet() -> None:
     agent = CodingAgent(client=client, model=MODEL_FLASH, thinking=False)
     print_welcome_banner(agent)
 
@@ -215,5 +210,5 @@ def main() -> None:
             logging.getLogger(__name__).exception("Unhandled error")
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
