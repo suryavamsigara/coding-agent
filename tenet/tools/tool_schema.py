@@ -468,7 +468,9 @@ OPENAI_TOOLS_LIST = [
                 "Run a shell command in the project directory.\n\n"
                 "Use for: pytest, ruff, mypy, pip install, npm run, git, cargo, make.\n"
                 "Destructive commands (rm, DROP TABLE, etc.) automatically ask for confirmation.\n"
-                "Do not use for file manipulation — use the file tools."
+                "Do not use for file manipulation — use the file tools.\n\n"
+                "NEVER use interactive scaffolding commands (npm create, create-react-app, etc.) "
+                "— they prompt for input and will hang. Write config files directly instead.\n\n"
             ),
             "parameters": {
                 "type": "object",

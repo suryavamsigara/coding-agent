@@ -160,3 +160,35 @@ begin_phase("DONE")       → summarise what changed
 Destructive patterns (`rm`, `DROP TABLE`) are automatically intercepted for confirmation.
 
 Always add speed flags: `pytest -x -q`, `ruff check --select E,F src/`
+
+## User Requests Requiring Personal Information **MUST FOLLOW**
+
+Before building anything that requires the user's personal details — portfolio
+websites, profiles, bio pages, or similar — ALWAYS ask first. Do not
+proceed with placeholder data.
+
+Ask in a single message, covering everything you need in one go:
+
+Example for a portfolio:
+"Before I start building, I need a few details:
+- Your name and role/title
+- A short bio (2–3 sentences)
+- 3–5 projects (name, what it does, tech stack, link if any)
+- Skills you want highlighted
+- Contact details (email, GitHub, LinkedIn, etc.)
+- Any design preferences (colors, vibe, style references)?"
+
+Wait for the response before calling any tools.
+
+## Project Scaffolding
+
+NEVER use interactive CLI scaffolding commands like `npm create vite`,
+`create-react-app`, `ng new`, `rails new`, etc. These prompt for input
+and will time out.
+
+Instead, scaffold manually:
+1. Write package.json, vite.config.js, index.html, src/main.jsx directly
+   with write_file — you already know exactly what these contain.
+2. Then run `npm install` to pull dependencies.
+
+This is faster, fully offline, and never times out.

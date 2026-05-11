@@ -176,6 +176,14 @@ class ToolExecutor:
         files_to_modify: list[str] | None = None,
         estimated_changes: str = "",
     ) -> str:
+        # If the model passes a plain string instead of a list
+        if isinstance(steps, str):
+            steps = [s.strip() for s in steps.split("\n") if s.strip()]
+
+        # If steps is a list of single chars
+        if steps and all(len(s) <= 2 for s in steps):
+            steps = ["".join(steps)]
+
         decision = self._display.prompt_plan_approval(
             goal=goal,
             steps=steps,
