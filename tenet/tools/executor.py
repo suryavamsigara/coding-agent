@@ -12,9 +12,9 @@ from tenet.tools.file_ops import (
 from tenet.tools.shell_ops import run_command
 
 #Hard limits
-_MAX_READ_FILE_LINES  = 100      # read_file refused above this line count
-_MAX_READ_FILE_CHARS  = 3_000   # read_file refused above this char count
-_MAX_RANGE_LINES      = 80     # read_file_range refused above this span
+_MAX_READ_FILE_LINES  = 200      # read_file refused above this line count
+_MAX_READ_FILE_CHARS  = 8_000   # read_file refused above this char count
+_MAX_RANGE_LINES      = 150     # read_file_range refused above this span
 
 # Patterns in a shell command that require user confirmation before running
 _DESTRUCTIVE_CMD_PATTERNS = (

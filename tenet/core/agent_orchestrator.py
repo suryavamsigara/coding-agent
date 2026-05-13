@@ -23,6 +23,11 @@ MODEL_PRO   = "deepseek-v4-pro"
 
 _MAX_STORED = 12_000   # chars kept in context per tool result
 
+# How full the window gets before compression fires
+_COMPRESS_THRESHOLD = 0.85
+# How many recent exchanges to keep after compression  
+_KEEP_EXCHANGES     = 10
+
 
 # Typed message containers
 
@@ -114,7 +119,7 @@ class CodingAgent:
         client: Any,
         model: str = MODEL_FLASH,
         thinking: bool = False,
-        max_history_messages: int = 60,
+        max_history_messages: int = 120,
         tools: list | None = None,
         log_dir=None,
     ) -> None:
@@ -176,6 +181,11 @@ class CodingAgent:
             for tool_call in msg.tool_calls:
                 self._dispatch_tool(tool_call)
                 total_tool_calls += 1
+            
+            used  = self.memory.window_size()
+            limit = self.memory.max_history_messages
+            # if used >= int(limit * _COMPRESS_THRESHOLD):
+            #     self._compress_context()
 
         # Iteration cap
         self.display.show_iteration_warning(max_iterations)
@@ -248,3 +258,76 @@ class CodingAgent:
             tool_name=name,
             content=stored,
         )
+    
+    def _compress_context(self) -> None:
+        """
+        Summarizes progress so far, pins the summary, then trims to recent
+        exchanges only. The window becomes:
+
+            [pinned system prompt]
+            [pinned project context]
+            [pinned summary ← updated]
+            [last _KEEP_EXCHANGES exchanges ← kept verbatim]
+        """
+        self.logger.log_llm_turn
+        self.display.con.print(
+            "\n[dim yellow]!  Context filling — summarising and compressing…[/dim yellow]"
+        )
+
+        self.memory.strip_reasoning_content()
+
+        # Build the summary prompt without polluting the real history
+        existing_summary = self._get_existing_summary()
+        summary_note = (
+            f"\n\nPrevious summary to UPDATE and EXTEND:\n{existing_summary}"
+            if existing_summary else ""
+        )
+
+        # Temporarily append the compression request
+        self.memory.messages.append({
+            "role": "user",
+            "content": (
+                "INTERNAL — do not mention this to the user.\n"
+                "The conversation history is being compressed to save context space.\n"
+                "Write a dense, complete progress report covering:\n"
+                "1. What has been accomplished so far (files created/modified, commands run)\n"
+                "2. Current state of each file (purpose, key decisions made)\n"
+                "3. What still needs to be done to complete the task\n"
+                "4. Any errors encountered and how they were resolved\n"
+                "Be exhaustive — this replaces the conversation history."
+                + summary_note
+            ),
+        })
+
+        summary_msg = self._stream_turn(iteration=0, max_iter=0)
+        summary_text = summary_msg.content or ""
+
+        # Remove the temporary compression request from history
+        self.memory.messages.pop()
+
+        # Pin the new/updated summary
+        self.memory.inject_summary(summary_text)
+
+        # Keep only the most recent exchanges verbatim
+        self.memory.trim_to_recent(keep_exchanges=_KEEP_EXCHANGES)
+
+        description = f"New window size: {self.memory.window_size()}, text-len: {len(summary_text)}"
+
+        self.logger.log_phase("Compression", description)
+        
+        self.display.con.print(
+            f"[dim green]✓  Compressed. Window: {self.memory.window_size()} "
+            f"/ {self.memory.max_history_messages}[/dim green]"
+        )
+
+
+    def _get_existing_summary(self) -> str | None:
+        """Return the current pinned summary text if one exists."""
+        if not self.memory._summary_injected:
+            return None
+        idx = self.memory._summary_slot()
+        msg = self.memory.messages[idx]
+        content = msg.get("content", "") if isinstance(msg, dict) else ""
+        # Strip the prefix we added
+        marker = "PROGRESS SUMMARY (history compressed — treat this as ground truth):\n\n"
+        return content.removeprefix(marker) if content.startswith(marker) else content

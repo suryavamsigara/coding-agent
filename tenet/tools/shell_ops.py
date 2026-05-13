@@ -11,6 +11,7 @@ BLOCKED_COMMANDS = {
 
 ALLOWED_PREFIXES = (
     "python", "python3", "pip", "pip3",
+    "uv", "uv pip", "uv run",
     "node", "npm", "npx", "yarn", "pnpm",
     "git",
     "cargo", "rustc",

@@ -13,6 +13,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.key_binding import KeyBindings
 
 from tenet.llm.client import client
 from tenet.core.agent_orchestrator import CodingAgent, MODEL_FLASH, MODEL_PRO
@@ -171,11 +172,12 @@ def start_tenet() -> None:
     session: PromptSession = PromptSession(
         history=FileHistory(HISTORY_FILE),
         auto_suggest=AutoSuggestFromHistory(),
+        multiline=True
     )
 
     while True:
         try:
-            user_input = session.prompt("\nYou: ", style=PROMPT_STYLE).strip()
+            user_input = session.prompt("\n> ", style=PROMPT_STYLE).strip()
         except KeyboardInterrupt:
             console.print("\n[bold yellow]Interrupted. Type 'exit' to quit.[/bold yellow]")
             continue

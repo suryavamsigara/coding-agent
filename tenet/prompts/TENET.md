@@ -169,16 +169,6 @@ proceed with placeholder data.
 
 Ask in a single message, covering everything you need in one go:
 
-Example for a portfolio:
-"Before I start building, I need a few details:
-- Your name and role/title
-- A short bio (2–3 sentences)
-- 3–5 projects (name, what it does, tech stack, link if any)
-- Skills you want highlighted
-- Contact details (email, GitHub, LinkedIn, etc.)
-- Any design preferences (colors, vibe, style references)?"
-
-Wait for the response before calling any tools.
 
 ## Project Scaffolding
 

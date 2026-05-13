@@ -111,6 +111,7 @@ class MemoryManager:
         self.max_history_messages = max_history_messages
         self.project = ProjectContext()
         self._context_injected = False
+        self._summary_injected = False
         self.messages: list[Any] = []
 
         self.clear()
@@ -121,7 +122,52 @@ class MemoryManager:
         """Reset conversation. Project context (knowledge) survives."""
         self.messages = [{"role": "system", "content": self.system_prompt}]
         self._context_injected = False
+        self._summary_injected = False
         self._sync_context_slot()
+
+    def inject_summary(self, summary_text: str) -> None:
+        """
+        Insert or update the pinned summary block that sits just before
+        the recent conversation window. Called by the orchestrator after
+        each compression run.
+        """
+        msg = {
+            "role": "system",
+            "content": (
+                "PROGRESS SUMMARY (history compressed — treat this as ground truth):\n\n"
+                + summary_text
+            ),
+        }
+        idx = self._summary_slot()
+        if self._summary_injected:
+            self.messages[idx] = msg          # update in place
+        else:
+            self.messages.insert(idx, msg)    # insert after pinned slots
+            self._summary_injected = True
+    
+    def trim_to_recent(self, keep_exchanges: int) -> None:
+        """
+        After compression, discard old exchanges keeping only the most
+        recent `keep_exchanges` complete exchanges in the window.
+        A complete exchange = one user message and everything until the next.
+        """
+        cs = self._conv_start()
+        # Collect indices of user messages in the window
+        user_indices = [
+            i for i in range(cs, len(self.messages))
+            if _msg_role(self.messages[i]) == "user"
+        ]
+        if len(user_indices) <= keep_exchanges:
+            return  # already short enough
+        # Cut everything before the Nth-from-last user message
+        cut_from = user_indices[-keep_exchanges]
+        del self.messages[cs:cut_from]
+
+    def _summary_slot(self) -> int:
+        """Index where the summary message lives (or should be inserted)."""
+        # After system prompt + optional project context
+        return 2 if self._context_injected else 1
+            
 
     def get_messages(self) -> list[dict]:
         """Return serialised message list ready to POST to the API."""
@@ -187,8 +233,13 @@ class MemoryManager:
                 self._context_injected = False
 
     def _conv_start(self) -> int:
-        """Index of the first conversation message (after pinned slots)."""
-        return 2 if self._context_injected else 1
+        """Index of the first conversation message (after all pinned slots)."""
+        base = 1
+        if self._context_injected:
+            base += 1
+        if self._summary_injected:
+            base += 1
+        return base
 
     # Debug snapshots
 
